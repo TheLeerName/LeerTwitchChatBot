@@ -86,7 +86,10 @@ async function onSessionKeepalive(session: Session, data: EventSub.Message.Sessi
 
 async function onNotification(session: Session, data: EventSub.Message.Notification) {
 	if (EventSub.Message.Notification.isChannelChatMessage(data)) {
+		if (data.payload.event.message_type !== "text") return;
+
 		const text = data.payload.event.message.text;
+
 		let index = text.indexOf(" ");
 		const command = text.substring(0, index > -1 ? index : text.length);
 		let answer: string | null = null;
@@ -100,48 +103,64 @@ async function onNotification(session: Session, data: EventSub.Message.Notificat
 		}
 		else if (command === "!банворд_добавить") {
 			console.log(`Got command\n\t${data.payload.event.chatter_user_name}\n\t${text}`);
-			const term = text.substring(command.length + 1);
-			if (term.length > 1) {
-				const response = await TwitchResponse.AddBlockedTerm(config.client_id, config.access_token, RequestQuery.AddBlockedTerm(session.channel_id, config.user_id), RequestBody.AddBlockedTerm(term));
-				console.log(`\t${JSON.stringify(response)}`);
-				answer = response.status === 200 ? `✅ Успешно! (${new Date(data.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! (${response.message})`;
+			if (isModerator(data.payload.event)) {
+				const term = text.substring(command.length + 1);
+				if (term.length > 1) {
+					const response = await TwitchResponse.AddBlockedTerm(config.client_id, config.access_token, RequestQuery.AddBlockedTerm(session.channel_id, config.user_id), RequestBody.AddBlockedTerm(term));
+					console.log(`\t${JSON.stringify(response)}`);
+					answer = response.status === 200 ? `✅ Успешно! (${new Date(data.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! (${response.message})`;
+				} else {
+					answer = `❌ Банворд должен быть длиннее 1 символа!`;
+				}
 			} else {
-				answer = `❌ Банворд должен быть длиннее 1 символа!`;
+				answer = `❌ Нет полномочий.`;
 			}
 		}
 		else if (command === "!банворд_удалить") {
 			console.log(`Got command\n\t${data.payload.event.chatter_user_name}\n\t${text}`);
-			const term = text.substring(command.length + 1);
-			if (term.length > 1) {
-				let response = await TwitchResponse.GetBlockedTerms(config.client_id, config.access_token, RequestQuery.GetBlockedTerms(session.channel_id, config.user_id));
-				console.log(`\t${JSON.stringify(response)}`);
-				if (response.status === 200) {
-					let id: string | null = null;
-					for (let entry of response.data) if (entry.text === term) id = entry.id;
-					if (id) {
-						let response = await TwitchResponse.RemoveBlockedTerm(config.client_id, config.access_token, RequestQuery.RemoveBlockedTerm(session.channel_id, config.user_id, id));
-						console.log(`\t${JSON.stringify(response)}`);
-						if (response.status === 204) {
-							answer = `✅ Успешно! (${new Date(data.metadata.message_timestamp).getTime() - Date.now()}ms)`;
+			if (isModerator(data.payload.event)) {
+				const term = text.substring(command.length + 1);
+				if (term.length > 1) {
+					let response = await TwitchResponse.GetBlockedTerms(config.client_id, config.access_token, RequestQuery.GetBlockedTerms(session.channel_id, config.user_id));
+					console.log(`\t${JSON.stringify(response)}`);
+					if (response.status === 200) {
+						let id: string | null = null;
+						for (let entry of response.data) if (entry.text === term) id = entry.id;
+						if (id) {
+							let response = await TwitchResponse.RemoveBlockedTerm(config.client_id, config.access_token, RequestQuery.RemoveBlockedTerm(session.channel_id, config.user_id, id));
+							console.log(`\t${JSON.stringify(response)}`);
+							if (response.status === 204) {
+								answer = `✅ Успешно! (${new Date(data.metadata.message_timestamp).getTime() - Date.now()}ms)`;
+							} else
+								answer = `❌ Ошибка! (${response.message})`;
 						} else
-							answer = `❌ Ошибка! (${response.message})`;
+							answer = `❌ Банворд не найден!`;
 					} else
-						answer = `❌ Банворд не найден!`;
-				} else
-					answer = `❌ Ошибка! (${response.message})`;
+						answer = `❌ Ошибка! (${response.message})`;
+				} else {
+					answer = `❌ Банворд должен быть длиннее 1 символа!`;
+				}
 			} else {
-				answer = `❌ Банворд должен быть длиннее 1 символа!`;
+				answer = `❌ Нет полномочий.`;
 			}
 		}
 		else if (command === "!банворд_лист") {
 			console.log(`Got command\n\t${data.payload.event.chatter_user_name}\n\t${text}`);
-			answer = `📜 https://dashboard.twitch.tv/u/${session.login}/settings/moderation/blocked-terms`;
+			if (isModerator(data.payload.event))
+				answer = `📜 https://dashboard.twitch.tv/u/${session.login}/settings/moderation/blocked-terms`;
+			else
+				answer = `❌ Нет полномочий.`;
 		}
 
 		if (answer) {
 			console.log(`\t${answer}\n\t${JSON.stringify(await TwitchResponse.SendChatMessage(config.client_id, config.access_token, RequestQuery.SendChatMessage(session.channel_id, config.user_id, answer, data.payload.event.message_id)))}\n`);
 		}
 	}
+}
+
+function isModerator(event: EventSub.Subscription.Event.ChannelChatMessage): boolean {
+	for (let badge of event.badges) if (badge.set_id === "moderator") return true;
+	return false;
 }
 
 async function onSessionReconnect(session: Session, data: EventSub.Message.SessionReconnect) {
