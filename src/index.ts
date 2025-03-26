@@ -107,7 +107,7 @@ async function onNotification(session: Session, data: EventSub.Message.Notificat
 		const text = data.payload.event.message.text.trim();
 		let index = text.indexOf(" ");
 		let reply: string | null = null;
-		const command = text.substring(0, index > -1 ? index : text.length);
+		const command = text.substring(0, index > -1 ? index : text.length).toLowerCase();
 
 		var log = false;
 		var logmessage = `Got message\n\tchannel: ${session.display_name}\n\ttype: ${data.metadata.message_type} (${data.payload.subscription.type})\n\tpayload_event: ${JSON.stringify(data.payload.event)}\n\tchatter: ${data.payload.event.chatter_user_name}\n\ttext: ${text}`;
