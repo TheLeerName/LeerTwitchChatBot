@@ -737,7 +737,6 @@ export namespace Response {
 			const request = await fetch(Request.GetUsers.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: Request.GetUsers.method, search: query}, init));
 			const response: any = await request.json();
 			response.status = request.status;
-			if (response.status === 200) response.data = response.data[0];
 			return response as ResponseBody.GetUsers | ResponseBodyError.GetUsers;
 		} catch(e) {
 			return {status: 400, message: e.toString()} as ResponseBodyError.GetUsers;

@@ -1,4 +1,4 @@
-import { config } from './index';
+import { config, saveConfig } from './index';
 
 export async function main() {
 	try {
@@ -7,8 +7,11 @@ export async function main() {
 				delete config.channels[process.argv[3]];
 			else {
 				const argLower = process.argv[3].toLowerCase();
-				for (let entry of Object.values(config.channels)) if (entry.login === argLower)
+				for (let [id, entry] of Object.entries(config.channels)) if (entry.login === argLower) {
+					delete config.channels[id];
+					saveConfig();
 					return console.log(`Channel ${entry.display_name} was removed from bot! Restart the bot to see changes`);
+				}
 
 				throw `Channel ${process.argv[3]} was not found!`;
 			}

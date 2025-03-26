@@ -167,11 +167,11 @@ export async function main() {
 	}
 
 	const commandsStr = "Commands:\n - " + [
-		"node dist/index.js channeladd <user_login>     - adds twitch channel to chatbot",
-		"node dist/index.js channeladd <user_id>        - adds twitch channel to chatbot",
-		"node dist/index.js channelremove <user_login>  - removes twitch channel to chatbot",
-		"node dist/index.js channelremove <user_id>     - removes twitch channel to chatbot",
-		"node dist/index.js                             - starts the bot"
+		"node dist/index.js add <user_login>     - adds twitch channel to chatbot",
+		"node dist/index.js add <user_id>        - adds twitch channel to chatbot",
+		"node dist/index.js remove <user_login>  - removes twitch channel to chatbot",
+		"node dist/index.js remove <user_id>     - removes twitch channel to chatbot",
+		"node dist/index.js                      - starts the bot"
 	].join('\n - ');
 	const commandName = process.argv[2];
 	if (commandName) {
