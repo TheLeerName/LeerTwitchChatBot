@@ -1,12 +1,15 @@
 {
 	"client_id": "0ho17t37uu3a4sfdrs6r76qwi51evf",
 	"scopes": [
+		"moderator:manage:blocked_terms",
 		"user:read:chat",
-		"user:write:chat",
-		"moderator:manage:blocked_terms"
+		"user:write:chat"
 	],
 	"access_token": "42zg74fvtit1ewiabsxib8azn17eis",
 	"user_id": "238330860",
+	"subscriptions_id": [
+		"52664425-8d5c-4dbf-b593-2f0fee1654c5"
+	],
 	"channels": {
 		"460273850": {
 			"login": "thaumwolf",

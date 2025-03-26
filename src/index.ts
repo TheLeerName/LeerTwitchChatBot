@@ -1,6 +1,6 @@
 import readline from 'readline';
 import fs from 'fs';
-import { Response as TwitchResponse, RequestBody, RequestQuery, EventSub } from './types';
+import { Response as TwitchResponse, RequestBody, RequestQuery, EventSub, ResponseBody } from './types';
 import { main as ChannelAdd } from './channeladd';
 import { main as ChannelRemove } from './channelremove';
 import { humanizer } from 'humanize-duration';
@@ -14,9 +14,10 @@ export interface Config {
 	access_token: string;
 	user_id: string;
 	scopes: string[];
+	subscriptions_id: string[];
 	channels: Record<string, ConfigChannelsEntry>;
 }
-export const config: Config = {client_id: "", scopes: [], access_token: "", user_id: "", channels: {}};
+export const config: Config = {client_id: "", scopes: [], access_token: "", user_id: "", subscriptions_id: [], channels: {}};
 export function saveConfig() {
 	fs.writeFileSync('config.json', JSON.stringify(config, null, '\t'));
 }
@@ -68,9 +69,15 @@ async function onMessage(session: Session, data: EventSub.Message.Any) {
 }
 
 async function onSessionWelcome(session: Session, data: EventSub.Message.SessionWelcome) {
-		session.eventsub = data.payload.session;
-		const m = JSON.stringify(await TwitchResponse.CreateEventSubSubscription(config.client_id, config.access_token, RequestBody.Subscription.ChannelChatMessage(session.eventsub.id, session.channel_id, session.channel_id)));
-		console.log(`Bot initialized\n\t${session.display_name}\n\t${m}\n`);
+	session.eventsub = data.payload.session;
+	if (!session.is_reconnecting) {
+		const response = await TwitchResponse.CreateEventSubSubscription(config.client_id, config.access_token, RequestBody.Subscription.ChannelChatMessage(session.eventsub.id, session.channel_id, config.user_id));
+		if (response.status === 202) {
+			config.subscriptions_id.push(response.data.id);
+			saveConfig();
+		}
+		console.log(`Bot initialized\n\t${session.display_name}\n\t${JSON.stringify(response)}\n`);
+	}
 }
 
 async function onSessionKeepalive(session: Session, data: EventSub.Message.SessionKeepalive) {
@@ -150,12 +157,14 @@ export async function main() {
 		if (!configJSON.access_token) throw `Corrupted config entry: access_token`;
 		if (!configJSON.user_id) throw `Corrupted config entry: user_id`;
 		if (!configJSON.scopes) throw `Corrupted config entry: scopes`;
+		if (!configJSON.subscriptions_id) throw `Corrupted config entry: subscriptions_id`;
 		if (!configJSON.channels) throw `Corrupted config entry: channels`;
 
 		config.client_id = configJSON.client_id;
 		config.user_id = configJSON.user_id;
 		config.access_token = configJSON.access_token;
 		config.scopes = configJSON.scopes;
+		config.subscriptions_id = configJSON.subscriptions_id;
 		for (let [user_id, entry] of Object.entries<any>(configJSON.channels)) {
 			if (typeof entry?.login === "string" && typeof entry?.display_name === "string")
 				config.channels[user_id] = {login: entry.login, display_name: entry.display_name};
@@ -225,6 +234,13 @@ export async function main() {
 }
 
 async function main2() {
+	if (config.subscriptions_id.length > 0) {
+		for (let id of config.subscriptions_id)
+			console.log(`Previous subscription deleted\n\t${id}\n\t${JSON.stringify(await TwitchResponse.DeleteEventSubSubscription(config.client_id, config.access_token, RequestQuery.DeleteEventSubSubscription(id)))}\n`);
+		config.subscriptions_id = [];
+		saveConfig();
+	}
+
 	for (let channel_id of Object.keys(config.channels))
 		connectWebSocket(channel_id);
 }

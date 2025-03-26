@@ -376,7 +376,7 @@ export namespace EventSub {
 }
 
 export namespace Request {
-	export type Name = "AddBlockedTerm" | "RemoveBlockedTerm" | "GetBlockedTerms" | "OAuth2Validate" | "CreateEventSubSubscription" | "GetUsers" | "SendChatMessage";
+	export type Name = "AddBlockedTerm" | "RemoveBlockedTerm" | "GetBlockedTerms" | "OAuth2Validate" | "CreateEventSubSubscription" | "GetUsers" | "SendChatMessage" | "DeleteEventSubSubscription";
 	export type Method = "GET" | "POST" | "DELETE";
 }
 export const Request: Record<Request.Name, {url: string, method: Request.Method}> = {
@@ -394,6 +394,8 @@ export const Request: Record<Request.Name, {url: string, method: Request.Method}
 	GetUsers: {url: "https://api.twitch.tv/helix/users", method: "GET"},
 	/** https://dev.twitch.tv/docs/api/reference/#send-chat-message */
 	SendChatMessage: {url: "https://api.twitch.tv/helix/chat/messages", method: "POST"},
+	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
+	DeleteEventSubSubscription: {url: "https://api.twitch.tv/helix/eventsub/subscriptions", method: "DELETE"},
 }
 export namespace RequestQuery {
 	/** https://dev.twitch.tv/docs/api/reference/#add-blocked-term */
@@ -446,6 +448,13 @@ export namespace RequestQuery {
 		reply_parent_message_id?: string;
 	}
 	export function SendChatMessage(broadcaster_id: string, sender_id: string, message: string, reply_parent_message_id?: string): SendChatMessage {return {broadcaster_id, sender_id, message, reply_parent_message_id}}
+
+	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
+	export interface DeleteEventSubSubscription {
+		/** The ID of the subscription to delete. */
+		id: string;
+	}
+	export function DeleteEventSubSubscription(id: string) {return {id}}
 }
 export namespace RequestBody {
 	export interface Subscription<
@@ -637,6 +646,10 @@ export namespace ResponseBody {
 		};
 		status: 200;
 	}
+	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
+	export interface DeleteEventSubSubscription {
+		status: 204;
+	}
 }
 export namespace ResponseBodyError {
 	/** https://dev.twitch.tv/docs/api/reference/#get-blocked-terms */
@@ -674,6 +687,11 @@ export namespace ResponseBodyError {
 		status: 400 | 401 | 403 | 422;
 		message: string;
 	}
+	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
+	export interface DeleteEventSubSubscription {
+		status: 400 | 401 | 404;
+		message: string;
+	}
 }
 export namespace Response {
 	/** https://dev.twitch.tv/docs/api/reference/#add-blocked-term */
@@ -692,7 +710,7 @@ export namespace Response {
 		try {
 			const request = await fetch(Request.RemoveBlockedTerm.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: Request.RemoveBlockedTerm.method, search: query}, init));
 			if (request.status === 204) return {status: 204} as ResponseBody.RemoveBlockedTerm;
-			else return await request.json() as ResponseBody.RemoveBlockedTerm | ResponseBodyError.RemoveBlockedTerm;
+			else return await request.json() as ResponseBodyError.RemoveBlockedTerm;
 		} catch(e) {
 			return {status: 400, message: e.toString()} as ResponseBodyError.RemoveBlockedTerm;
 		}
@@ -752,6 +770,16 @@ export namespace Response {
 			return response as ResponseBody.SendChatMessage | ResponseBodyError.SendChatMessage;
 		} catch(e) {
 			return {status: 400, message: e.toString()} as ResponseBodyError.SendChatMessage;
+		}
+	}
+	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
+	export async function DeleteEventSubSubscription(client_id: string, access_token: string, query: RequestQuery.DeleteEventSubSubscription, init?: RequestInitUndici) {
+		try {
+			const request = await fetch(Request.DeleteEventSubSubscription.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: Request.DeleteEventSubSubscription.method, search: query}, init));
+			if (request.status === 204) return {status: 204} as ResponseBody.DeleteEventSubSubscription;
+			else return await request.json() as ResponseBodyError.DeleteEventSubSubscription;
+		} catch(e) {
+			return {status: 400, message: e.toString()} as ResponseBodyError.DeleteEventSubSubscription;
 		}
 	}
 }
