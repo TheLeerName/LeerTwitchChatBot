@@ -1,0 +1,16 @@
+{
+	"client_id": "0ho17t37uu3a4sfdrs6r76qwi51evf",
+	"scopes": [
+		"user:read:chat",
+		"user:write:chat",
+		"moderator:manage:blocked_terms"
+	],
+	"access_token": "42zg74fvtit1ewiabsxib8azn17eis",
+	"user_id": "238330860",
+	"channels": {
+		"238330860": {
+			"login": "theleername",
+			"display_name": "TheLeerName"
+		}
+	}
+}
