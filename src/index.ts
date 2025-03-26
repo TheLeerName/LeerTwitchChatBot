@@ -1,15 +1,15 @@
 import readline from 'readline';
 import fs from 'fs';
-import { Response as TwitchResponse, RequestBody, RequestQuery, EventSub, ResponseBody } from './types';
+import { Request, RequestBody, RequestQuery, EventSub } from './types';
 import { main as ChannelAdd } from './channeladd';
 import { main as ChannelRemove } from './channelremove';
 import { humanizer } from 'humanize-duration';
 
-export interface ConfigChannelsEntry {
+interface ConfigChannelsEntry {
 	login: string;
 	display_name: string;
 }
-export interface Config {
+interface Config {
 	client_id: string;
 	access_token: string;
 	user_id: string;
@@ -17,6 +17,17 @@ export interface Config {
 	subscriptions_id: string[];
 	channels: Record<string, ConfigChannelsEntry>;
 }
+interface Session {
+	ws: WebSocket;
+	channel_id: string;
+	login: string;
+	display_name: string;
+
+	reconnect_url?: string;
+	keepalive_timeout?: NodeJS.Timeout;
+	eventsub?: EventSub.Session;
+}
+
 export const config: Config = {client_id: "", scopes: [], access_token: "", user_id: "", subscriptions_id: [], channels: {}};
 export function saveConfig() {
 	fs.writeFileSync('config.json', JSON.stringify(config, null, '\t'));
@@ -24,35 +35,34 @@ export function saveConfig() {
 
 const WebSocketSSLURL = "wss://eventsub.wss.twitch.tv/ws";
 const redirect_uri = "http://localhost";
+const sessions: Record<string, Session> = {};
 const HumanizeDuration = humanizer({largest: 3, round: true, delimiter: " ", language: "ru"});
 
-interface Session {
-	ws: WebSocket;
-	channel_id: string;
-	login: string;
-	display_name: string;
-	is_reconnecting: boolean;
-	keepalive_timeout?: NodeJS.Timeout;
-	eventsub?: EventSub.Session;
+function isModerator(payload: EventSub.Payload.ChannelChatMessage): boolean {
+	for (let badge of payload.event.badges) if (badge.set_id === "moderator" || badge.set_id === "broadcaster") return true;
+	return false;
 }
-export const sessions: Record<string, Session> = {};
-function connectWebSocket(channel_id: string, reconnect_url?: string) {
+
+function connectWebSocket(channel_id: string) {
+	let reconnect_url: string | undefined;
 	let session = sessions[channel_id];
 	if (session) {
+		reconnect_url = session.reconnect_url;
 		session.ws.close();
 		delete session.eventsub;
 		delete sessions[channel_id];
 	}
 	const channelConfig = config.channels[channel_id];
-	session = {channel_id, login: channelConfig.login, display_name: channelConfig.display_name, is_reconnecting: reconnect_url != null, ws: new WebSocket(reconnect_url ?? WebSocketSSLURL)};
+	session = {channel_id, login: channelConfig.login, display_name: channelConfig.display_name, ws: new WebSocket(reconnect_url ?? WebSocketSSLURL)};
+	if (reconnect_url) session.reconnect_url = reconnect_url;
 
 	session.ws.addEventListener('close', e => {
-		console.log(`WebSocket closed\n\t${session.display_name}\n\t${e.code}\n\t${e.reason}\n`);
-		connectWebSocket(channel_id, e.code === 4008 ? WebSocketSSLURL : undefined);
+		console.log(`WebSocket closed\n\tchannel: ${session.display_name}\n\tcode: ${e.code}\n\treason: ${e.reason}\n`);
+		connectWebSocket(channel_id);
 	});
 	session.ws.addEventListener('message', e => onMessage(session, JSON.parse(e.data)));
 	sessions[channel_id] = session;
-	console.log(`WebSocket opened\n\t${session.display_name}\n\t${session.ws.url}\n`);
+	console.log(`WebSocket opened\n\tchannel: ${session.display_name}\n\turl: ${session.ws.url}\n`);
 }
 
 async function onMessage(session: Session, data: EventSub.Message.Any) {
@@ -65,23 +75,29 @@ async function onMessage(session: Session, data: EventSub.Message.Any) {
 	else if (EventSub.Message.isSessionKeepalive(data)) onSessionKeepalive(session, data);
 	else if (EventSub.Message.isNotification(data)) onNotification(session, data);
 	else if (EventSub.Message.isSessionReconnect(data)) onSessionReconnect(session, data);
-	else console.log(`Unsupported message type\n\t${data.metadata.message_type}\n\t${JSON.stringify(data)}\n`);
+	else console.log(`Got unsupported message\n\tchannel: ${session.display_name}\n\ttype: ${data.metadata.message_type}\n\tdata: ${JSON.stringify(data)}\n`);
 }
 
 async function onSessionWelcome(session: Session, data: EventSub.Message.SessionWelcome) {
+	var logmessage = `Got message\n\tchannel: ${session.display_name}\n\ttype: ${data.metadata.message_type}\n\tpayload_session: ${JSON.stringify(data.payload.session)}`;
+
 	session.eventsub = data.payload.session;
-	if (!session.is_reconnecting) {
-		const response = await TwitchResponse.CreateEventSubSubscription(config.client_id, config.access_token, RequestBody.Subscription.ChannelChatMessage(session.eventsub.id, session.channel_id, config.user_id));
+	if (!session.reconnect_url) {
+		const response = await Request.CreateEventSubSubscription(config.client_id, config.access_token, EventSub.Subscription.ChannelChatMessage(session.eventsub.id, session.channel_id, config.user_id));
 		if (response.status === 202) {
 			config.subscriptions_id.push(response.data.id);
 			saveConfig();
+			response.data.type
 		}
-		console.log(`Bot initialized\n\t${session.display_name}\n\t${JSON.stringify(response)}\n`);
-	}
+		logmessage += `\n\tsubscription: ${JSON.stringify(response)}`;
+	} else
+		delete session.reconnect_url;
+	console.log(`${logmessage}\n`);
 }
 
 async function onSessionKeepalive(session: Session, data: EventSub.Message.SessionKeepalive) {
-	session.keepalive_timeout = setTimeout(() => session.ws.close(4005, 'session_keepalive timeout'), (session.eventsub!.keepalive_timeout_seconds + 2) * 1000);
+	//console.log(`Got message\n\tchannel: ${session.display_name}\n\ttype: ${data.metadata.message_type}\n\tmetadata: ${JSON.stringify(data.metadata)}\n`);
+	session.keepalive_timeout = setTimeout(() => session.ws.close(4005, "session_keepalive timeout"), (session.eventsub!.keepalive_timeout_seconds + 2) * 1000);
 }
 
 async function onNotification(session: Session, data: EventSub.Message.Notification) {
@@ -89,82 +105,77 @@ async function onNotification(session: Session, data: EventSub.Message.Notificat
 		if (data.payload.event.message_type !== "text") return;
 
 		const text = data.payload.event.message.text;
-
 		let index = text.indexOf(" ");
+		let reply: string | null = null;
 		const command = text.substring(0, index > -1 ? index : text.length);
-		let answer: string | null = null;
+
+		var log = false;
+		var logmessage = `Got message\n\tchannel: ${session.display_name}\n\ttype: ${data.metadata.message_type} (${data.payload.subscription.type})\n\tpayload_event: ${JSON.stringify(data.payload.event)}\n\tchatter: ${data.payload.event.chatter_user_name}\n\ttext: ${text}`;
+
 		if (command === "!пинг") {
-			console.log(`Got command\n\t${data.payload.event.chatter_user_name}\n\t${text}`);
-			answer = `🏓 Понг! (${new Date(data.metadata.message_timestamp).getTime() - Date.now()}ms)`;
+			log = true;
+			reply = `🏓 Понг! (${new Date(data.metadata.message_timestamp).getTime() - Date.now()}ms)`;
 		}
 		else if (command === "!аптайм") {
-			console.log(`Got command\n\t${data.payload.event.chatter_user_name}\n\t${text}`);
-			answer = `⏱️ ${HumanizeDuration(new Date(data.payload.subscription.created_at).getTime() - Date.now())}`;
+			log = true;
+			reply = `⏱️ ${HumanizeDuration(new Date(data.payload.subscription.created_at).getTime() - Date.now())}`;
 		}
 		else if (command === "!банворд_добавить") {
-			console.log(`Got command\n\t${data.payload.event.chatter_user_name}\n\t${text}`);
-			if (isModerator(data.payload.event)) {
+			log = true;
+			if (isModerator(data.payload)) {
 				const term = text.substring(command.length + 1);
 				if (term.length > 1) {
-					const response = await TwitchResponse.AddBlockedTerm(config.client_id, config.access_token, RequestQuery.AddBlockedTerm(session.channel_id, config.user_id), RequestBody.AddBlockedTerm(term));
-					console.log(`\t${JSON.stringify(response)}`);
-					answer = response.status === 200 ? `✅ Успешно! (${new Date(data.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! (${response.message})`;
+					const response = await Request.AddBlockedTerm(config.client_id, config.access_token, RequestQuery.AddBlockedTerm(session.channel_id, config.user_id), RequestBody.AddBlockedTerm(term));
+					logmessage += `\n\tresponse_addblockedterm: ${JSON.stringify(response)}`;
+					reply = response.status === 200 ? `✅ Успешно! (${new Date(data.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! (${response.message})`;
 				} else {
-					answer = `❌ Банворд должен быть длиннее 1 символа!`;
+					reply = `❌ Банворд должен быть длиннее 1 символа!`;
 				}
 			} else {
-				answer = `❌ Нет полномочий.`;
+				reply = `❌ Нет полномочий.`;
 			}
 		}
 		else if (command === "!банворд_удалить") {
-			console.log(`Got command\n\t${data.payload.event.chatter_user_name}\n\t${text}`);
-			if (isModerator(data.payload.event)) {
+			log = true;
+			if (isModerator(data.payload)) {
 				const term = text.substring(command.length + 1);
 				if (term.length > 1) {
-					let response = await TwitchResponse.GetBlockedTerms(config.client_id, config.access_token, RequestQuery.GetBlockedTerms(session.channel_id, config.user_id));
-					console.log(`\t${JSON.stringify(response)}`);
+					let response = await Request.GetBlockedTerms(config.client_id, config.access_token, RequestQuery.GetBlockedTerms(session.channel_id, config.user_id));
+					logmessage += `\n\tresponse_getblockedterms: ${JSON.stringify(response)}`;
 					if (response.status === 200) {
 						let id: string | null = null;
 						for (let entry of response.data) if (entry.text === term) id = entry.id;
 						if (id) {
-							let response = await TwitchResponse.RemoveBlockedTerm(config.client_id, config.access_token, RequestQuery.RemoveBlockedTerm(session.channel_id, config.user_id, id));
-							console.log(`\t${JSON.stringify(response)}`);
+							let response = await Request.RemoveBlockedTerm(config.client_id, config.access_token, RequestQuery.RemoveBlockedTerm(session.channel_id, config.user_id, id));
+							logmessage += `\n\tresponse_removeblockedterm: ${JSON.stringify(response)}`;
 							if (response.status === 204) {
-								answer = `✅ Успешно! (${new Date(data.metadata.message_timestamp).getTime() - Date.now()}ms)`;
+								reply = `✅ Успешно! (${new Date(data.metadata.message_timestamp).getTime() - Date.now()}ms)`;
 							} else
-								answer = `❌ Ошибка! (${response.message})`;
+								reply = `❌ Ошибка! (${response.message})`;
 						} else
-							answer = `❌ Банворд не найден!`;
+							reply = `❌ Банворд не найден!`;
 					} else
-						answer = `❌ Ошибка! (${response.message})`;
+						reply = `❌ Ошибка! (${response.message})`;
 				} else {
-					answer = `❌ Банворд должен быть длиннее 1 символа!`;
+					reply = `❌ Банворд должен быть длиннее 1 символа!`;
 				}
 			} else {
-				answer = `❌ Нет полномочий.`;
+				reply = `❌ Нет полномочий.`;
 			}
 		}
 		else if (command === "!банворд_лист") {
-			console.log(`Got command\n\t${data.payload.event.chatter_user_name}\n\t${text}`);
-			if (isModerator(data.payload.event))
-				answer = `📜 https://dashboard.twitch.tv/u/${session.login}/settings/moderation/blocked-terms`;
-			else
-				answer = `❌ Нет полномочий.`;
+			log = true;
+			reply = isModerator(data.payload) ? `📜 https://dashboard.twitch.tv/u/${session.login}/settings/moderation/blocked-terms` : `❌ Нет полномочий.`;
 		}
 
-		if (answer) {
-			console.log(`\t${answer}\n\t${JSON.stringify(await TwitchResponse.SendChatMessage(config.client_id, config.access_token, RequestQuery.SendChatMessage(session.channel_id, config.user_id, answer, data.payload.event.message_id)))}\n`);
-		}
+		if (reply) logmessage += `\n\treply_text: ${reply}\n\tresponse_sendchatmessage: ${JSON.stringify(await Request.SendChatMessage(config.client_id, config.access_token, RequestQuery.SendChatMessage(session.channel_id, config.user_id, reply, data.payload.event.message_id)))}`;
+		if (log) console.log(`${logmessage}\n`);
 	}
 }
 
-function isModerator(event: EventSub.Subscription.Event.ChannelChatMessage): boolean {
-	for (let badge of event.badges) if (badge.set_id === "moderator" || badge.set_id === "broadcaster") return true;
-	return false;
-}
-
 async function onSessionReconnect(session: Session, data: EventSub.Message.SessionReconnect) {
-	session.ws.close(4008, data.payload.session.reconnect_url);
+	session.reconnect_url = data.payload.session.reconnect_url;
+	session.ws.close(4008, "session_reconnect message");
 }
 
 export async function main() {
@@ -213,9 +224,9 @@ export async function main() {
 		return;
 	}
 
-	const response = await TwitchResponse.OAuth2Validate(config.access_token);
+	const response = await Request.OAuth2Validate(config.access_token);
 	console.log("Validating access token...");
-	console.log(`\t${JSON.stringify(response)}\n`);
+	console.log(`\tresponse: ${JSON.stringify(response)}\n`);
 	if (response.status === 400 || response.status === 401 || (response.status === 200 && response.scopes.sort().join('') !== config.scopes.sort().join(''))) {
 		console.log(`Access token expired!`);
 		console.log(`Go to link and authorize the app: https://id.twitch.tv/oauth2/authorize?response_type=token&client_id=${config.client_id}&redirect_uri=${redirect_uri}&scope=${config.scopes.join('%20')}\n`);
@@ -255,7 +266,7 @@ export async function main() {
 async function main2() {
 	if (config.subscriptions_id.length > 0) {
 		for (let id of config.subscriptions_id)
-			console.log(`Previous subscription deleted\n\t${id}\n\t${JSON.stringify(await TwitchResponse.DeleteEventSubSubscription(config.client_id, config.access_token, RequestQuery.DeleteEventSubSubscription(id)))}\n`);
+			console.log(`Previous subscription deleted\n\tid: ${id}\n\tresponse: ${JSON.stringify(await Request.DeleteEventSubSubscription(config.client_id, config.access_token, RequestQuery.DeleteEventSubSubscription(id)))}\n`);
 		config.subscriptions_id = [];
 		saveConfig();
 	}

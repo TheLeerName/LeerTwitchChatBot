@@ -1,24 +1,7 @@
 import { fetch, RequestInit, RequestInitUndici } from './advanced-fetch';
 
 export namespace EventSub {
-	export interface Transport {
-		/** The transport method. */
-		method: "websocket";
-		/** An ID that identifies the WebSocket to send notifications to. When you connect to EventSub using WebSockets, the server returns the ID in the [Welcome message](https://dev.twitch.tv/docs/eventsub/handling-websocket-events#welcome-message). */
-		session_id: string;
-	}
-	export function Transport(session_id: string): Transport {return {method: "websocket", session_id}}
-	export namespace Transport {
-		export interface CreateEventSubSubscription extends Transport {
-			/** The UTC date and time that the WebSocket connection was established. This is a response-only field that [Create EventSub Subscription](https://dev.twitch.tv/docs/api/reference#create-eventsub-subscription) and [Get EventSub Subscription](https://dev.twitch.tv/docs/api/reference#get-eventsub-subscriptions) returns. */
-			connected_at: string;
-		}
-		export interface GetEventSubSubscription extends CreateEventSubSubscription {
-			/** The UTC date and time that the WebSocket connection was lost. This is a response-only field that [Get EventSub Subscription](https://dev.twitch.tv/docs/api/reference#get-eventsub-subscriptions) returns. */
-			disconnected_at: string;
-		}
-	}
-
+	/** An object that contains information about the connection. */
 	export interface Session<
 		Status extends string = "connected",
 		KeepaliveTimeoutSeconds extends number | null = number,
@@ -38,76 +21,121 @@ export namespace EventSub {
 		connected_at: string;
 	}
 
+	/** An object that identifies the message. */
+	export interface Metadata<MessageType extends string = string> {
+		/** An ID that uniquely identifies the message. Twitch sends messages at least once, but if Twitch is unsure of whether you received a notification, it’ll resend the message. This means you may receive a notification twice. If Twitch resends the message, the message ID will be the same. */
+		message_id: string;
+		/** The type of message. */
+		message_type: MessageType;
+		/** The UTC date and time that the message was sent. */
+		message_timestamp: string;
+	}
+	export namespace Metadata {
+		/** An object that identifies the subscription message. */
+		export interface Subscription<
+			MessageType extends string = string,
+			SubscriptionType extends string = string,
+			SubscriptionVersion extends Subscription.Version = Subscription.Version
+		> extends Metadata<MessageType> {
+			/** The type of event sent in the message. */
+			subscription_type: SubscriptionType;
+			/** The version number of the subscription type's definition. This is the same value specified in the subscription request. */
+			subscription_version: SubscriptionVersion;
+		}
+	}
+
+	/** Subscription-related parameters */
+	export interface Subscription<
+		Type extends string = string,
+		Version extends Subscription.Version = Subscription.Version,
+		Condition extends Subscription.Condition = Subscription.Condition,
+		Transport extends Subscription.Transport = Subscription.Transport
+	> {
+		/** The subscription type name. */
+		type: Type;
+		/** The subscription version. */
+		version: Version;
+		/** Subscription-specific parameters. */
+		condition: Condition;
+		/** Transport-specific parameters. */
+		transport: Transport;
+	}
 	export namespace Subscription {
+		/** Definition of the subscription. */
 		export type Version = "1" | "2";
 
+		/** Parameters under which the event subscription fires. */
 		export type Condition = {};
 		export namespace Condition {
-			export interface BroadcasterAndUserID extends Condition {
+			/** Parameters under which the event subscription fires. */
+			export interface ChannelChatMessage extends Condition {
 				/** The User ID of the channel to receive chat message events for. */
 				broadcaster_user_id: string;
 				/** The User ID to read chat as. */
 				user_id: string;
 			}
+			/**
+			 * @param broadcaster_user_id The User ID of the channel to receive chat message events for.
+			 * @param user_id The User ID to read chat as.
+			 */
+			export function ChannelChatMessage(broadcaster_user_id: string, user_id: string): ChannelChatMessage {return {broadcaster_user_id, user_id}}
 		}
 
-		export type Event = {};
-		export namespace Event {
-			export interface MessageFragment<Type extends string = string> {
-				/** The type of message fragment. */
-				type: string;
-				/** Message text in fragment. */
-				text: string;
+		/** Defines the transport details that you want Twitch to use when sending you event notifications. */
+		export interface Transport {
+			/** The transport method. */
+			method: "websocket";
+			/** An ID that identifies the WebSocket to send notifications to. When you connect to EventSub using WebSockets, the server returns the ID in the [Welcome message](https://dev.twitch.tv/docs/eventsub/handling-websocket-events#welcome-message). */
+			session_id: string;
+		}
+		/** @param session_id An ID that identifies the WebSocket to send notifications to. When you connect to EventSub using WebSockets, the server returns the ID in the [Welcome message](https://dev.twitch.tv/docs/eventsub/handling-websocket-events#welcome-message). */
+		export function Transport(session_id: string): Transport {return {method: "websocket", session_id}}
+		export namespace Transport {
+			/** Defines the transport details that you want Twitch to use when sending you event notifications. */
+			export interface CreateEventSubSubscription extends Transport {
+				/** The UTC date and time that the WebSocket connection was established. */
+				connected_at: string;
 			}
-			export namespace MessageFragment {
-				export type Text = MessageFragment<"text">;
-				export interface Cheermote extends MessageFragment<"cheermote"> {
-					/** Metadata pertaining to the cheermote. */
-					cheermote: {
-						/**
-						 * The name portion of the Cheermote string that you use in chat to cheer Bits.
-						 * The full Cheermote string is the concatenation of {prefix} + {number of Bits}.
-						 * For example, if the prefix is "Cheer" and you want to cheer 100 Bits,
-						 * the full Cheermote string is Cheer100.
-						 */
-						prefix: string;
-						/** The amount of Bits cheered. */
-						bits: number;
-						/** The tier level of the cheermote. */
-						tier: number;
-					};
-				}
-				export interface Emote extends MessageFragment<"emote"> {
-					/** Metadata pertaining to the emote. */
-					emote: {
-						/** An ID that uniquely identifies this emote. */
-						id: string;
-						/** An ID that identifies the emote set that the emote belongs to. */
-						emote_set_id: string;
-						/** The ID of the broadcaster who owns the emote. */
-						owner_id: string;
-						/**
-						 * The formats that the emote is available in. Possible values:
-						 * - `animated` - An animated GIF is available for this emote
-						 * - `static` - A static PNG file is available for this emote
-						 */
-						format: Array<"animated" | "static">;
-					};
-				}
-				export interface Mention extends MessageFragment<"mention"> {
-					/** Metadata pertaining to the mention. */
-					mention: {
-						/** The user ID of the mentioned user. */
-						user_id: string;
-						/** The user name of the mentioned user. */
-						user_name: string;
-						/** The user login of the mentioned user. */
-						user_login: string;
-					};
-				}
+			/** Defines the transport details that you want Twitch to use when sending you event notifications. */
+			export interface GetEventSubSubscription extends CreateEventSubSubscription {
+				/** The UTC date and time that the WebSocket connection was lost. */
+				disconnected_at: string;
 			}
+		}
 
-			export interface ChannelChatMessage {
+		/** The `channel.chat.message` subscription type sends a notification when any user sends a message to a channel’s chat room. [Read More](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/#channelchatmessage) */
+		export type ChannelChatMessage = Subscription<"channel.chat.message", "1", Condition.ChannelChatMessage, Transport>;
+		export function ChannelChatMessage(session_id: string, broadcaster_user_id: string, user_id: string): ChannelChatMessage {
+			return {type: "channel.chat.message", version: "1", condition: Condition.ChannelChatMessage(broadcaster_user_id, user_id), transport: Transport(session_id)}
+		}
+	}
+
+	/** An object that contains the message. */
+	export interface Payload<Subscription_ extends Subscription = Subscription, Status extends string = "enabled"> {
+		/** An object that contains information about your subscription. */
+		subscription: {
+			/** An ID that uniquely identifies this subscription. */
+			id: string;
+			/** The subscription's status. */
+			status: Status;
+			/** The type of event sent in the message. See the `event` field. */
+			type: Subscription_["type"];
+			/** The version number of the subscription type's definition. */
+			version: Subscription_["version"];
+			/** The event's cost. See [Subscription limits](https://dev.twitch.tv/docs/eventsub/manage-subscriptions#subscription-limits). */
+			cost: number;
+			/** The conditions under which the event fires. For example, if you requested notifications when a broadcaster gets a new follower, this object contains the broadcaster's ID. For information about the condition's data, see the subscription type's description in [Subscription types](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types). */
+			condition: Subscription_["condition"];
+			/** An object that contains information about the transport used for notifications. */
+			transport: Subscription_["transport"];
+			/** The UTC date and time that the subscription was created. */
+			created_at: string;
+		};
+	}
+	export namespace Payload {
+		export interface ChannelChatMessage extends Payload<Subscription.ChannelChatMessage> {
+			/** The event’s data. For information about the event’s data, see the subscription type’s description in [Subscription Types](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types). */
+			event: {
 				/** The broadcaster user ID. */
 				broadcaster_user_id: string;
 				/** The broadcaster display name. */
@@ -220,7 +248,62 @@ export namespace EventSub {
 					/** Contains metadata related to the chat badges. */
 					info: string;
 				}> | null;
-			}
+			};
+		}
+	}
+
+	/** Chat message fragment. */
+	export interface MessageFragment<Type extends string = string> {
+		/** The type of message fragment. */
+		type: string;
+		/** Message text in fragment. */
+		text: string;
+	}
+	export namespace MessageFragment {
+		export type Text = MessageFragment<"text">;
+		export interface Cheermote extends MessageFragment<"cheermote"> {
+			/** Metadata pertaining to the cheermote. */
+			cheermote: {
+				/**
+				 * The name portion of the Cheermote string that you use in chat to cheer Bits.
+				 * The full Cheermote string is the concatenation of {prefix} + {number of Bits}.
+				 * For example, if the prefix is "Cheer" and you want to cheer 100 Bits,
+				 * the full Cheermote string is Cheer100.
+				 */
+				prefix: string;
+				/** The amount of Bits cheered. */
+				bits: number;
+				/** The tier level of the cheermote. */
+				tier: number;
+			};
+		}
+		export interface Emote extends MessageFragment<"emote"> {
+			/** Metadata pertaining to the emote. */
+			emote: {
+				/** An ID that uniquely identifies this emote. */
+				id: string;
+				/** An ID that identifies the emote set that the emote belongs to. */
+				emote_set_id: string;
+				/** The ID of the broadcaster who owns the emote. */
+				owner_id: string;
+				/**
+				 * The formats that the emote is available in. Possible values:
+				 * - `animated` - An animated GIF is available for this emote
+				 * - `static` - A static PNG file is available for this emote
+				 */
+				format: Array<"animated" | "static">;
+			};
+		}
+		export interface Mention extends MessageFragment<"mention"> {
+			/** Metadata pertaining to the mention. */
+			mention: {
+				/** The user ID of the mentioned user. */
+				user_id: string;
+				/** The user name of the mentioned user. */
+				user_name: string;
+				/** The user login of the mentioned user. */
+				user_login: string;
+			};
 		}
 	}
 
@@ -235,14 +318,7 @@ export namespace EventSub {
 		/** Defines the first message that the EventSub WebSocket server sends after your client connects to the server. [Read More](https://dev.twitch.tv/docs/eventsub/handling-websocket-events#welcome-message) */
 		export interface SessionWelcome {
 			/** An object that identifies the message. */
-			metadata: {
-				/** An ID that uniquely identifies the message. Twitch sends messages at least once, but if Twitch is unsure of whether you received a notification, it’ll resend the message. This means you may receive a notification twice. If Twitch resends the message, the message ID will be the same. */
-				message_id: string;
-				/** The type of message, which is set to **session_welcome**. */
-				message_type: "session_welcome";
-				/** The UTC date and time that the message was sent. */
-				message_timestamp: string;
-			};
+			metadata: Metadata<"session_welcome">;
 			/** An object that contains the message. */
 			payload: {
 				/** An object that contains information about the connection. */
@@ -252,79 +328,31 @@ export namespace EventSub {
 		/** Defines the message that the EventSub WebSocket server sends your client to indicate that the WebSocket connection is healthy. [Read More](https://dev.twitch.tv/docs/eventsub/handling-websocket-events#keepalive-message) */
 		export interface SessionKeepalive {
 			/** An object that identifies the message. */
-			metadata: {
-				/** An ID that uniquely identifies the message. Twitch sends messages at least once, but if Twitch is unsure of whether you received a notification, it’ll resend the message. This means you may receive a notification twice. If Twitch resends the message, the message ID is the same. */
-				message_id: string;
-				/** The type of message, which is set to **session_keepalive**. */
-				message_type: "session_keepalive";
-				/** The UTC date and time that the message was sent. */
-				message_timestamp: string;
-			};
+			metadata: Metadata<"session_keepalive">;
 			/** An empty object. */
 			payload: {};
 		}
 
-		export interface Notification<
-			Type extends string = string,
-			Version extends Subscription.Version = Subscription.Version,
-			Condition extends Subscription.Condition = Subscription.Condition,
-			Transport extends EventSub.Transport = EventSub.Transport,
-			Event extends Subscription.Event = Subscription.Event
-		> {
+		/** Defines a message that the EventSub WebSocket server sends your client when an event that you subscribe to occurs. [Read More](https://dev.twitch.tv/docs/eventsub/handling-websocket-events#notification-message) */
+		export interface Notification<Payload_ extends Payload = Payload> {
 			/** An object that identifies the message. */
-			metadata: {
-				/** An ID that uniquely identifies the message. Twitch sends messages at least once, but if Twitch is unsure of whether you received a notification, it'll resend the message. This means you may receive a notification twice. If Twitch resends the message, the message ID will be the same. */
-				message_id: string;
-				/** The type of message, which is set to **notification**. */
-				message_type: "notification";
-				/** The UTC date and time that the message was sent. */
-				message_timestamp: string;
-				/** The type of event sent in the message. */
-				subscription_type: Type;
-				/** The version number of the subscription type's definition. This is the same value specified in the subscription request. */
-				subscription_version: Version;
-			};
+			metadata: Metadata.Subscription<"notification", Payload_["subscription"]["type"], Payload_["subscription"]["version"]>;
 			/** An object that contains the message. */
-			payload: {
-				/** An object that contains information about your subscription. */
-				subscription: {
-					/** An ID that uniquely identifies this subscription. */
-					id: string;
-					/** The subscription's status, which is set to **enabled**. */
-					status: "enabled";
-					/** The type of event sent in the message. See the `event` field. */
-					type: Type;
-					/** The version number of the subscription type's definition. */
-					version: Version;
-					/** The event's cost. See [Subscription limits](https://dev.twitch.tv/docs/eventsub/manage-subscriptions#subscription-limits). */
-					cost: number;
-					/** The conditions under which the event fires. For example, if you requested notifications when a broadcaster gets a new follower, this object contains the broadcaster's ID. For information about the condition's data, see the subscription type's description in [Subscription types](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types). */
-					condition: Condition;
-					/** An object that contains information about the transport used for notifications. */
-					transport: Transport;
-					/** The UTC date and time that the subscription was created. */
-					created_at: string;
-				};
-				/** The event’s data. For information about the event’s data, see the subscription type’s description in [Subscription Types](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types). */
-				event: Event;
-			};
+			payload: Payload_;
 		}
 		export namespace Notification {
 			export function isChannelChatMessage(data: EventSub.Message.Notification): data is ChannelChatMessage { return data.metadata.subscription_type === "channel.chat.message" && data.metadata.subscription_version === "1" }
-			export type ChannelChatMessage = Message.Notification<"channel.chat.message", "1", Subscription.Condition.BroadcasterAndUserID, Transport, Subscription.Event.ChannelChatMessage>;
+			/** Defines a message that the EventSub WebSocket server sends your client when the `channel.chat.message` event occurs. [Read More](https://dev.twitch.tv/docs/eventsub/handling-websocket-events#notification-message) */
+			export type ChannelChatMessage = Message.Notification<Payload.ChannelChatMessage>;
 		}
 
 		/** Defines the message that the EventSub WebSocket server sends if the server must drop the connection. [Read More](https://dev.twitch.tv/docs/eventsub/handling-websocket-events#reconnect-message) */
 		export interface SessionReconnect {
-			metadata: {
-				/** An ID that uniquely identifies the message. Twitch sends messages at least once, but if Twitch is unsure of whether you received a notification, it’ll resend the message. This means you may receive a notification twice. If Twitch resends the message, the message ID will be the same. */
-				message_id: string;
-				/** The type of message, which is set to **session_reconnect**. */
-				message_type: "session_reconnect";
-				/** The UTC date and time that the message was sent. */
-				message_timestamp: string;
-			};
+			/** An object that identifies the message. */
+			metadata: Metadata<"session_reconnect">;
+			/** An object that contains the message. */
 			payload: {
+				/** An object that contains information about the reconnection. */
 				session: Session<"reconnecting", null, string>;
 			};
 		}
@@ -332,54 +360,18 @@ export namespace EventSub {
 		/** Defines the message that the EventSub WebSocket server sends if the user no longer exists or they revoked the authorization token that the subscription relied on. [Read More](https://dev.twitch.tv/docs/eventsub/handling-websocket-events#revocation-message) */
 		export interface Revocation {
 			/** An object that identifies the message. */
-			metadata: {
-				/** An ID that uniquely identifies the message. Twitch sends messages at least once, but if Twitch is unsure of whether you received a notification, it'll resend the message. This means you may receive a notification twice. If Twitch resends the message, the message ID will be the same. */
-				message_id: string;
-				/** The type of message, which is set to **revocation**. */
-				message_type: "revocation";
-				/** The UTC date and time that the message was sent. */
-				message_timestamp: string;
-				/** The type of event sent in the message. */
-				subscription_type: string,
-				/** The version number of the subscription type's definition. This is the same value specified in the subscription request. */
-				subscription_version: Subscription.Version;
-			};
+			metadata: Metadata.Subscription<"revocation", string, Subscription.Version>;
 			/** An object that contains the message. */
-			payload: {
-				/** An object that contains information about your subscription. */
-				subscription: {
-					/** An ID that uniquely identifies this subscription. */
-					id: string;
-					/** 
-					 * The subscription's status. Possible values:
-					 * - `authorization_revoked` — The user in the condition object revoked the authorization
-					 * - `user_removed` — The user in the condition object is no longer a Twitch user
-					 * - `version_removed` — The subscribed to subscription type and version is no longer supported
-					 */
-					status: "authorization_revoked" | "user_removed" | "version_removed";
-					/** The type of event sent in the message. */
-					type: string;
-					/** The version number of the subscription type's definition. */
-					version: Subscription.Version;
-					/** The event's cost. See [Subscription limits](https://dev.twitch.tv/docs/eventsub/manage-subscriptions#subscription-limits). */
-					cost: number;
-					/** The conditions under which the event fires. For example, if you requested notifications when a broadcaster gets a new follower, this object contains the broadcaster's ID. For information about the condition's data, see the subscription type's description in [Subscription Types](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types). */
-					condition: Subscription.Condition | any;
-					/** An object that contains information about the transport used for notifications. */
-					transport: Transport;
-					/** The UTC date and time that the subscription was created. */
-					created_at: string;
-				};
-			};
+			payload: Payload<Subscription, "authorization_revoked" | "user_removed" | "version_removed">;
 		}
 	}
 }
 
-export namespace Request {
+export namespace RequestParameters {
 	export type Name = "AddBlockedTerm" | "RemoveBlockedTerm" | "GetBlockedTerms" | "OAuth2Validate" | "CreateEventSubSubscription" | "GetUsers" | "SendChatMessage" | "DeleteEventSubSubscription";
 	export type Method = "GET" | "POST" | "DELETE";
 }
-export const Request: Record<Request.Name, {url: string, method: Request.Method}> = {
+export const RequestParameters: Record<RequestParameters.Name, {url: string, method: RequestParameters.Method}> = {
 	/** https://dev.twitch.tv/docs/api/reference/#add-blocked-term */
 	AddBlockedTerm: {url: "https://api.twitch.tv/helix/moderation/blocked_terms", method: "POST"},
 	/** https://dev.twitch.tv/docs/api/reference/#remove-blocked-term */
@@ -457,27 +449,6 @@ export namespace RequestQuery {
 	export function DeleteEventSubSubscription(id: string) {return {id}}
 }
 export namespace RequestBody {
-	export interface Subscription<
-		Type extends string = string,
-		Version extends EventSub.Subscription.Version = EventSub.Subscription.Version,
-		Condition extends EventSub.Subscription.Condition = EventSub.Subscription.Condition,
-		Transport extends EventSub.Transport = EventSub.Transport
-	> {
-		/** The subscription type name. */
-		type: Type;
-		/** The subscription version. */
-		version: Version;
-		/** Subscription-specific parameters. */
-		condition: Condition;
-		/** Transport-specific parameters. */
-		transport: Transport;
-	}
-	export namespace Subscription {
-		export type ChannelChatMessage = Subscription<"channel.chat.message", "1", EventSub.Subscription.Condition.BroadcasterAndUserID, EventSub.Transport>;
-		export function ChannelChatMessage(session_id: string, broadcaster_user_id: string, user_id: string): ChannelChatMessage {return {
-			type: "channel.chat.message", version: "1", condition: {broadcaster_user_id, user_id}, transport: {method: "websocket", session_id}}}
-	}
-
 	/** https://dev.twitch.tv/docs/api/reference/#add-blocked-term */
 	export interface AddBlockedTerm {
 		/** The word or phrase to block from being used in the broadcaster’s chat room. The term must contain a minimum of 2 characters and may contain up to a maximum of 500 characters. Terms may include a wildcard character (*). The wildcard character must appear at the beginning or end of a word or set of characters. For example, `*foo` or `foo*`. If the blocked term already exists, the response contains the existing blocked term. */
@@ -553,12 +524,7 @@ export namespace ResponseBody {
 		status: 200;
 	}
 	/** https://dev.twitch.tv/docs/api/reference/#create-eventsub-subscription */
-	export interface CreateEventSubSubscription<
-		Type extends string = string,
-		Version extends EventSub.Subscription.Version = EventSub.Subscription.Version,
-		Condition extends EventSub.Subscription.Condition = EventSub.Subscription.Condition,
-		Transport extends EventSub.Transport = EventSub.Transport
-	> {
+	export interface CreateEventSubSubscription<Subscription extends EventSub.Subscription = EventSub.Subscription> {
 		/** A object that contains the single subscription that you created. */
 		data: {
 			/** An ID that identifies the subscription. */
@@ -570,15 +536,15 @@ export namespace ResponseBody {
 			 */
 			status: "enabled" | "webhook_callback_verification_pending";
 			/** The subscription’s type. See [Subscription Types](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types#subscription-types). */
-			type: Type;
+			type: Subscription["type"];
 			/** The version number that identifies this definition of the subscription’s data. */
-			version: Version;
+			version: Subscription["version"];
 			/** The subscription’s parameter values. */
-			condition: Condition;
+			condition: Subscription["condition"];
 			/** The date and time (in RFC3339 format) of when the subscription was created. */
 			created_at: string;
 			/** The transport details used to send the notifications. */
-			transport: Transport;
+			transport: EventSub.Subscription.Transport.CreateEventSubSubscription;
 			/** The UTC date and time that the WebSocket connection was established. */
 			connected_at: string;
 			/** The amount that the subscription counts against your limit. [Learn More](https://dev.twitch.tv/docs/eventsub/manage-subscriptions/#subscription-limits) */
@@ -693,11 +659,11 @@ export namespace ResponseBodyError {
 		message: string;
 	}
 }
-export namespace Response {
+export namespace Request {
 	/** https://dev.twitch.tv/docs/api/reference/#add-blocked-term */
 	export async function AddBlockedTerm(client_id: string, access_token: string, query: RequestQuery.AddBlockedTerm, body: RequestBody.AddBlockedTerm, init?: RequestInitUndici) {
 		try {
-			const request = await fetch(Request.AddBlockedTerm.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: Request.AddBlockedTerm.method, body: JSON.stringify(body), search: query}, init));
+			const request = await fetch(RequestParameters.AddBlockedTerm.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.AddBlockedTerm.method, body: JSON.stringify(body), search: query}, init));
 			const response: any = await request.json();
 			response.status = request.status;
 			return response as ResponseBody.AddBlockedTerm | ResponseBodyError.AddBlockedTerm;
@@ -708,7 +674,7 @@ export namespace Response {
 	/** https://dev.twitch.tv/docs/api/reference/#remove-blocked-term */
 	export async function RemoveBlockedTerm(client_id: string, access_token: string, query: RequestQuery.RemoveBlockedTerm, init?: RequestInitUndici) {
 		try {
-			const request = await fetch(Request.RemoveBlockedTerm.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: Request.RemoveBlockedTerm.method, search: query}, init));
+			const request = await fetch(RequestParameters.RemoveBlockedTerm.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.RemoveBlockedTerm.method, search: query}, init));
 			if (request.status === 204) return {status: 204} as ResponseBody.RemoveBlockedTerm;
 			else return await request.json() as ResponseBodyError.RemoveBlockedTerm;
 		} catch(e) {
@@ -718,7 +684,7 @@ export namespace Response {
 	/** https://dev.twitch.tv/docs/api/reference/#get-blocked-terms */
 	export async function GetBlockedTerms(client_id: string, access_token: string, query: RequestQuery.GetBlockedTerms, init?: RequestInitUndici) {
 		try {
-			const request = await fetch(Request.GetBlockedTerms.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: Request.GetBlockedTerms.method, search: query}, init));
+			const request = await fetch(RequestParameters.GetBlockedTerms.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.GetBlockedTerms.method, search: query}, init));
 			const response: any = await request.json();
 			response.status = request.status;
 			return response as ResponseBody.GetBlockedTerms | ResponseBodyError.GetBlockedTerms;
@@ -729,7 +695,7 @@ export namespace Response {
 	/** https://dev.twitch.tv/docs/authentication/validate-tokens/#how-to-validate-a-token */
 	export async function OAuth2Validate(access_token: string, init?: RequestInitUndici) {
 		try {
-			const request = await fetch(Request.OAuth2Validate.url, FetchAddToInit({headers: {"Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: Request.OAuth2Validate.method}, init));
+			const request = await fetch(RequestParameters.OAuth2Validate.url, FetchAddToInit({headers: {"Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.OAuth2Validate.method}, init));
 			const response: any = await request.json();
 			response.status = request.status;
 			return response as ResponseBody.OAuth2Validate | ResponseBodyError.OAuth2Validate;
@@ -738,13 +704,14 @@ export namespace Response {
 		}
 	}
 	/** https://dev.twitch.tv/docs/api/reference/#create-eventsub-subscription */
-	export async function CreateEventSubSubscription(client_id: string, access_token: string, body: RequestBody.Subscription, init?: RequestInitUndici) {
+	export async function CreateEventSubSubscription<Subscription extends EventSub.Subscription>(client_id: string, access_token: string, subscription: Subscription, init?: RequestInitUndici) {
 		try {
-			const request = await fetch(Request.CreateEventSubSubscription.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: Request.CreateEventSubSubscription.method, body: JSON.stringify(body)}, init));
+			const request = await fetch(RequestParameters.CreateEventSubSubscription.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.CreateEventSubSubscription.method, body: JSON.stringify(subscription)}, init));
 			const response: any = await request.json();
 			response.status = request.status;
 			if (response.status === 202) response.data = response.data[0];
-			return response as ResponseBody.CreateEventSubSubscription<typeof body.type, typeof body.version, typeof body.condition, typeof body.transport> | ResponseBodyError.CreateEventSubSubscription;
+
+			return response as ResponseBody.CreateEventSubSubscription<Subscription> | ResponseBodyError.CreateEventSubSubscription;
 		} catch(e) {
 			return {status: 400, message: e.toString()} as ResponseBodyError.CreateEventSubSubscription;
 		}
@@ -752,7 +719,7 @@ export namespace Response {
 	/** https://dev.twitch.tv/docs/api/reference/#get-users */
 	export async function GetUsers(client_id: string, access_token: string, query: RequestQuery.GetUsers.Any, init?: RequestInitUndici) {
 		try {
-			const request = await fetch(Request.GetUsers.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: Request.GetUsers.method, search: query}, init));
+			const request = await fetch(RequestParameters.GetUsers.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.GetUsers.method, search: query}, init));
 			const response: any = await request.json();
 			response.status = request.status;
 			return response as ResponseBody.GetUsers | ResponseBodyError.GetUsers;
@@ -763,7 +730,7 @@ export namespace Response {
 	/** https://dev.twitch.tv/docs/api/reference/#send-chat-message */
 	export async function SendChatMessage(client_id: string, access_token: string, query: RequestQuery.SendChatMessage, init?: RequestInitUndici) {
 		try {
-			const request = await fetch(Request.SendChatMessage.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: Request.SendChatMessage.method, search: query}, init));
+			const request = await fetch(RequestParameters.SendChatMessage.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.SendChatMessage.method, search: query}, init));
 			const response: any = await request.json();
 			response.status = request.status;
 			if (response.status === 200) response.data = response.data[0];
@@ -775,7 +742,7 @@ export namespace Response {
 	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
 	export async function DeleteEventSubSubscription(client_id: string, access_token: string, query: RequestQuery.DeleteEventSubSubscription, init?: RequestInitUndici) {
 		try {
-			const request = await fetch(Request.DeleteEventSubSubscription.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: Request.DeleteEventSubSubscription.method, search: query}, init));
+			const request = await fetch(RequestParameters.DeleteEventSubSubscription.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.DeleteEventSubSubscription.method, search: query}, init));
 			if (request.status === 204) return {status: 204} as ResponseBody.DeleteEventSubSubscription;
 			else return await request.json() as ResponseBodyError.DeleteEventSubSubscription;
 		} catch(e) {

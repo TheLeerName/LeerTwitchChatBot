@@ -1,10 +1,10 @@
 import { config, saveConfig } from './index';
-import { Response } from './types';
+import { Request } from './types';
 
 export async function main() {
 	try {
 		if (process.argv[3]) {
-			const response = await Response.GetUsers(config.client_id, config.access_token, process.argv[3] === `${parseInt(process.argv[3])}` ? {id: process.argv[3]} : {login: process.argv[3].toLowerCase()});
+			const response = await Request.GetUsers(config.client_id, config.access_token, process.argv[3] === `${parseInt(process.argv[3])}` ? {id: process.argv[3]} : {login: process.argv[3].toLowerCase()});
 			if (response.status !== 200) throw response.message;
 
 			if (response.data.length === 0) throw `Channel ${process.argv[3]} was not found!`;
