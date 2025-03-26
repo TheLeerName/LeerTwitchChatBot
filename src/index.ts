@@ -104,7 +104,7 @@ async function onNotification(session: Session, data: EventSub.Message.Notificat
 	if (EventSub.Message.Notification.isChannelChatMessage(data)) {
 		if (data.payload.event.message_type !== "text") return;
 
-		const text = data.payload.event.message.text;
+		const text = data.payload.event.message.text.trim();
 		let index = text.indexOf(" ");
 		let reply: string | null = null;
 		const command = text.substring(0, index > -1 ? index : text.length);
