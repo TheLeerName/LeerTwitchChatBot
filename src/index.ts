@@ -159,7 +159,7 @@ async function onNotification(session: Session, data: EventSub.Message.Notificat
 }
 
 function isModerator(event: EventSub.Subscription.Event.ChannelChatMessage): boolean {
-	for (let badge of event.badges) if (badge.set_id === "moderator") return true;
+	for (let badge of event.badges) if (badge.set_id === "moderator" || badge.set_id === "broadcaster") return true;
 	return false;
 }
 
