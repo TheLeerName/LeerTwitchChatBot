@@ -263,9 +263,9 @@ export async function main() {
 				for (let k_v of link.split("&")) {
 					const [k, access_token] = k_v.split("=", 2);
 					if (k === "access_token") {
-						console.log(`Saving access token ${access_token}...\n\ttoken: ${access_token}`);
+						console.log(`Saving access token...\n\ttoken: ${access_token}`);
 						const response = await Request.OAuth2Validate(access_token);
-						console.log(`\tvalidate_response: ${response}`);
+						console.log(`\tvalidate_response: ${JSON.stringify(response)}`);
 						if (response.status === 200) {
 							data.access_token = access_token;
 							console.log(`\ttoken_owner_id: ${response.user_id}\n`);
