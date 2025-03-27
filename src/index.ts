@@ -227,7 +227,18 @@ export async function main() {
 	const response = await Request.OAuth2Validate(config.access_token);
 	console.log("Validating access token...");
 	console.log(`\tresponse: ${JSON.stringify(response)}\n`);
-	if (response.status === 400 || response.status === 401 || (response.status === 200 && response.scopes.sort().join('') !== config.scopes.sort().join(''))) {
+
+	const isWrongScopes = response.status === 200 && response.scopes.sort().join('') !== config.scopes.sort().join('');
+	if (response.status === 400 || response.status === 401 || isWrongScopes) {
+		if (isWrongScopes) {
+			console.log("Revoking access token... (has wrong scopes)");
+			const response2 = await Request.OAuth2Revoke(config.client_id, config.access_token);
+			console.log(`\tresponse: ${JSON.stringify(response2)}\n`);
+		}
+
+		config.access_token = "";
+		saveConfig();
+
 		console.log(`Access token expired!`);
 		console.log(`Go to link and authorize the app: https://id.twitch.tv/oauth2/authorize?response_type=token&client_id=${config.client_id}&redirect_uri=${redirect_uri}&scope=${config.scopes.join('%20')}\n`);
 		const rl = readline.createInterface({input: process.stdin, output: process.stdout});

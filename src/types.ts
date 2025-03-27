@@ -368,7 +368,7 @@ export namespace EventSub {
 }
 
 export namespace RequestParameters {
-	export type Name = "AddBlockedTerm" | "RemoveBlockedTerm" | "GetBlockedTerms" | "OAuth2Validate" | "CreateEventSubSubscription" | "GetUsers" | "SendChatMessage" | "DeleteEventSubSubscription";
+	export type Name = "AddBlockedTerm" | "RemoveBlockedTerm" | "GetBlockedTerms" | "OAuth2Validate" | "OAuth2Revoke" | "GetUsers" | "SendChatMessage" | "CreateEventSubSubscription" | "DeleteEventSubSubscription";
 	export type Method = "GET" | "POST" | "DELETE";
 }
 export const RequestParameters: Record<RequestParameters.Name, {url: string, method: RequestParameters.Method}> = {
@@ -380,15 +380,18 @@ export const RequestParameters: Record<RequestParameters.Name, {url: string, met
 	GetBlockedTerms: {url: "https://api.twitch.tv/helix/moderation/blocked_terms", method: "GET"},
 	/** https://dev.twitch.tv/docs/authentication/validate-tokens/#how-to-validate-a-token */
 	OAuth2Validate: {url: "https://id.twitch.tv/oauth2/validate", method: "GET"},
-	/** https://dev.twitch.tv/docs/api/reference/#create-eventsub-subscription */
-	CreateEventSubSubscription: {url: "https://api.twitch.tv/helix/eventsub/subscriptions", method: "POST"},
+	/** https://dev.twitch.tv/docs/authentication/revoke-tokens/#revoking-access-tokens */
+	OAuth2Revoke: {url: "https://id.twitch.tv/oauth2/revoke", method: "POST"},
 	/** https://dev.twitch.tv/docs/api/reference/#get-users */
 	GetUsers: {url: "https://api.twitch.tv/helix/users", method: "GET"},
 	/** https://dev.twitch.tv/docs/api/reference/#send-chat-message */
 	SendChatMessage: {url: "https://api.twitch.tv/helix/chat/messages", method: "POST"},
+	/** https://dev.twitch.tv/docs/api/reference/#create-eventsub-subscription */
+	CreateEventSubSubscription: {url: "https://api.twitch.tv/helix/eventsub/subscriptions", method: "POST"},
 	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
 	DeleteEventSubSubscription: {url: "https://api.twitch.tv/helix/eventsub/subscriptions", method: "DELETE"},
 }
+
 export namespace RequestQuery {
 	/** https://dev.twitch.tv/docs/api/reference/#add-blocked-term */
 	export interface AddBlockedTerm {
@@ -398,12 +401,14 @@ export namespace RequestQuery {
 		moderator_id: string;
 	}
 	export function AddBlockedTerm(broadcaster_id: string, moderator_id: string): AddBlockedTerm {return {broadcaster_id, moderator_id}}
+
 	/** https://dev.twitch.tv/docs/api/reference/#remove-blocked-term */
 	export interface RemoveBlockedTerm extends AddBlockedTerm {
 		/** The ID of the blocked term to remove from the broadcaster’s list of blocked terms. */
 		id: string;
 	}
 	export function RemoveBlockedTerm(broadcaster_id: string, moderator_id: string, id: string): RemoveBlockedTerm {return {broadcaster_id, moderator_id, id}}
+
 	/** https://dev.twitch.tv/docs/api/reference/#get-blocked-terms */
 	export interface GetBlockedTerms extends AddBlockedTerm {
 		/** The maximum number of items to return per page in the response. The minimum page size is 1 item per page and the maximum is 100 items per page. The default is 20. */
@@ -412,6 +417,7 @@ export namespace RequestQuery {
 		after?: string;
 	}
 	export function GetBlockedTerms(broadcaster_id: string, moderator_id: string, first?: string, after?: string): GetBlockedTerms {return {broadcaster_id, moderator_id, first, after}}
+
 	/** https://dev.twitch.tv/docs/api/reference/#get-users */
 	export namespace GetUsers {
 		export type Any = ByID | ByLogin;
@@ -428,6 +434,7 @@ export namespace RequestQuery {
 		}
 		export function ByLogin(login: string): ByLogin {return {login}}
 	}
+
 	/** https://dev.twitch.tv/docs/api/reference/#send-chat-message */
 	export interface SendChatMessage {
 		/** The ID of the broadcaster whose chat room the message will be sent to. */
@@ -448,6 +455,7 @@ export namespace RequestQuery {
 	}
 	export function DeleteEventSubSubscription(id: string) {return {id}}
 }
+
 export namespace RequestBody {
 	/** https://dev.twitch.tv/docs/api/reference/#add-blocked-term */
 	export interface AddBlockedTerm {
@@ -456,9 +464,14 @@ export namespace RequestBody {
 	}
 	export function AddBlockedTerm(text: string): AddBlockedTerm {return {text}}
 }
+
+export interface ResponseBody<Status extends number = 200> {
+	/** The code status of request. */
+	status: Status;
+}
 export namespace ResponseBody {
 	/** https://dev.twitch.tv/docs/api/reference/#get-blocked-terms */
-	export interface GetBlockedTerms {
+	export interface GetBlockedTerms extends ResponseBody {
 		/** The list of blocked terms. The list is in descending order of when they were created (see the `created_at` timestamp). */
 		data: {
 			/** The broadcaster that owns the list of blocked terms. */
@@ -481,10 +494,10 @@ export namespace ResponseBody {
 				cursor: string;
 			};
 		}[];
-		status: 200;
 	}
+
 	/** https://dev.twitch.tv/docs/api/reference/#add-blocked-term */
-	export interface AddBlockedTerm {
+	export interface AddBlockedTerm extends ResponseBody {
 		/** A list that contains the single blocked term that the broadcaster added. */
 		data: {
 			/** The broadcaster that owns the list of blocked terms. */
@@ -507,59 +520,26 @@ export namespace ResponseBody {
 				cursor: string;
 			};
 		}[];
-		status: 200;
 	}
+
 	/** https://dev.twitch.tv/docs/api/reference/#remove-blocked-term */
-	export interface RemoveBlockedTerm {
-		status: 204;
-	}
+	export type RemoveBlockedTerm = ResponseBody<204>;
+
 	/** https://dev.twitch.tv/docs/authentication/validate-tokens/#how-to-validate-a-token */
-	export interface OAuth2Validate {
+	export interface OAuth2Validate extends ResponseBody<200> {
 		client_id: string;
 		access_token: string;
 		login: string;
 		scopes: string[];
 		user_id: string;
 		expires_in: number;
-		status: 200;
 	}
-	/** https://dev.twitch.tv/docs/api/reference/#create-eventsub-subscription */
-	export interface CreateEventSubSubscription<Subscription extends EventSub.Subscription = EventSub.Subscription> {
-		/** A object that contains the single subscription that you created. */
-		data: {
-			/** An ID that identifies the subscription. */
-			id: string;
-			/**
-			 * The subscription’s status. The subscriber receives events only for enabled subscriptions. Possible values are:
-			 * - `enabled` — The subscription is enabled.
-			 * - `webhook_callback_verification_pending` — The subscription is pending verification of the specified callback URL (see [Responding to a challenge request](https://dev.twitch.tv/docs/eventsub/handling-webhook-events#responding-to-a-challenge-request)).
-			 */
-			status: "enabled" | "webhook_callback_verification_pending";
-			/** The subscription’s type. See [Subscription Types](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types#subscription-types). */
-			type: Subscription["type"];
-			/** The version number that identifies this definition of the subscription’s data. */
-			version: Subscription["version"];
-			/** The subscription’s parameter values. */
-			condition: Subscription["condition"];
-			/** The date and time (in RFC3339 format) of when the subscription was created. */
-			created_at: string;
-			/** The transport details used to send the notifications. */
-			transport: EventSub.Subscription.Transport.CreateEventSubSubscription;
-			/** The UTC date and time that the WebSocket connection was established. */
-			connected_at: string;
-			/** The amount that the subscription counts against your limit. [Learn More](https://dev.twitch.tv/docs/eventsub/manage-subscriptions/#subscription-limits) */
-			cost: number;
-		};
-		/** The total number of subscriptions you’ve created. */
-		total: number;
-		/** The sum of all of your subscription costs. [Learn More](https://dev.twitch.tv/docs/eventsub/manage-subscriptions/#subscription-limits) */
-		total_cost: number;
-		/** The maximum total cost that you’re allowed to incur for all subscriptions you create. */
-		max_total_cost: number;
-		status: 202;
-	}
+
+	/** https://dev.twitch.tv/docs/authentication/revoke-tokens/#revoking-access-tokens */
+	export type OAuth2Revoke = ResponseBody<200>;
+
 	/** https://dev.twitch.tv/docs/api/reference/#get-users */
-	export interface GetUsers {
+	export interface GetUsers extends ResponseBody<200> {
 		data: {
 			/** An ID that identifies the user. */
 			id: string;
@@ -593,10 +573,10 @@ export namespace ResponseBody {
 			/** The UTC date and time that the user’s account was created. The timestamp is in RFC3339 format. */
 			created_at: string;
 		}[];
-		status: 200;
 	}
+
 	/** https://dev.twitch.tv/docs/api/reference/#send-chat-message */
-	export interface SendChatMessage {
+	export interface SendChatMessage extends ResponseBody<200> {
 		data: {
 			/** The message id for the message that was sent. */
 			message_id: string;
@@ -610,55 +590,80 @@ export namespace ResponseBody {
 				message: string;
 			} | null;
 		};
-		status: 200;
 	}
+
+	/** https://dev.twitch.tv/docs/api/reference/#create-eventsub-subscription */
+	export interface CreateEventSubSubscription<Subscription extends EventSub.Subscription = EventSub.Subscription> extends ResponseBody<202> {
+		/** A object that contains the single subscription that you created. */
+		data: {
+			/** An ID that identifies the subscription. */
+			id: string;
+			/**
+			 * The subscription’s status. The subscriber receives events only for enabled subscriptions. Possible values are:
+			 * - `enabled` — The subscription is enabled.
+			 * - `webhook_callback_verification_pending` — The subscription is pending verification of the specified callback URL (see [Responding to a challenge request](https://dev.twitch.tv/docs/eventsub/handling-webhook-events#responding-to-a-challenge-request)).
+			 */
+			status: "enabled" | "webhook_callback_verification_pending";
+			/** The subscription’s type. See [Subscription Types](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types#subscription-types). */
+			type: Subscription["type"];
+			/** The version number that identifies this definition of the subscription’s data. */
+			version: Subscription["version"];
+			/** The subscription’s parameter values. */
+			condition: Subscription["condition"];
+			/** The date and time (in RFC3339 format) of when the subscription was created. */
+			created_at: string;
+			/** The transport details used to send the notifications. */
+			transport: EventSub.Subscription.Transport.CreateEventSubSubscription;
+			/** The UTC date and time that the WebSocket connection was established. */
+			connected_at: string;
+			/** The amount that the subscription counts against your limit. [Learn More](https://dev.twitch.tv/docs/eventsub/manage-subscriptions/#subscription-limits) */
+			cost: number;
+		};
+		/** The total number of subscriptions you’ve created. */
+		total: number;
+		/** The sum of all of your subscription costs. [Learn More](https://dev.twitch.tv/docs/eventsub/manage-subscriptions/#subscription-limits) */
+		total_cost: number;
+		/** The maximum total cost that you’re allowed to incur for all subscriptions you create. */
+		max_total_cost: number;
+	}
+
 	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
-	export interface DeleteEventSubSubscription {
-		status: 204;
-	}
+	export type DeleteEventSubSubscription = ResponseBody<204>;
+}
+
+export interface ResponseBodyError<Status extends number = number> extends ResponseBody<400 | Status> {
+	/** The error message of request. */
+	message: string;
 }
 export namespace ResponseBodyError {
 	/** https://dev.twitch.tv/docs/api/reference/#get-blocked-terms */
-	export interface GetBlockedTerms {
-		status: 400 | 401 | 403;
-		message: string;
-	}
+	export type GetBlockedTerms = ResponseBodyError<401 | 403>;
+
 	/** https://dev.twitch.tv/docs/api/reference/#add-blocked-term */
-	export interface AddBlockedTerm {
-		status: 400 | 401 | 403;
-		message: string;
-	}
+	export type AddBlockedTerm = ResponseBodyError<401 | 403>;
+
 	/** https://dev.twitch.tv/docs/api/reference/#remove-blocked-term */
-	export interface RemoveBlockedTerm {
-		status: 400 | 401 | 403;
-		message: string;
-	}
+	export type RemoveBlockedTerm = ResponseBodyError<401 | 403>;
+
 	/** https://dev.twitch.tv/docs/authentication/validate-tokens/#how-to-validate-a-token */
-	export interface OAuth2Validate {
-		status: 400 | 401;
-		message: string;
-	}
+	export type OAuth2Validate = ResponseBodyError<401>;
+
+	/** https://dev.twitch.tv/docs/authentication/revoke-tokens/#revoking-access-token */
+	export type OAuth2Revoke = ResponseBodyError<404>;
+
 	/** https://dev.twitch.tv/docs/api/reference/#create-eventsub-subscription */
-	export interface CreateEventSubSubscription {
-		status: 400 | 401 | 403 | 409 | 429;
-		message: string;
-	}
+	export type CreateEventSubSubscription = ResponseBodyError<401 | 403 | 409 | 429>;
+
 	/** https://dev.twitch.tv/docs/api/reference/#get-users */
-	export interface GetUsers {
-		status: 400 | 401;
-		message: string;
-	}
+	export type GetUsers = ResponseBodyError<401>;
+
 	/** https://dev.twitch.tv/docs/api/reference/#send-chat-message */
-	export interface SendChatMessage {
-		status: 400 | 401 | 403 | 422;
-		message: string;
-	}
+	export type SendChatMessage = ResponseBodyError<401 | 403 | 422>;
+
 	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
-	export interface DeleteEventSubSubscription {
-		status: 400 | 401 | 404;
-		message: string;
-	}
+	export type DeleteEventSubSubscription = ResponseBodyError<401 | 404>;
 }
+
 export namespace Request {
 	/** https://dev.twitch.tv/docs/api/reference/#add-blocked-term */
 	export async function AddBlockedTerm(client_id: string, access_token: string, query: RequestQuery.AddBlockedTerm, body: RequestBody.AddBlockedTerm, init?: RequestInitUndici) {
@@ -671,6 +676,7 @@ export namespace Request {
 			return {status: 400, message: e.toString()} as ResponseBodyError.AddBlockedTerm;
 		}
 	}
+
 	/** https://dev.twitch.tv/docs/api/reference/#remove-blocked-term */
 	export async function RemoveBlockedTerm(client_id: string, access_token: string, query: RequestQuery.RemoveBlockedTerm, init?: RequestInitUndici) {
 		try {
@@ -681,6 +687,7 @@ export namespace Request {
 			return {status: 400, message: e.toString()} as ResponseBodyError.RemoveBlockedTerm;
 		}
 	}
+
 	/** https://dev.twitch.tv/docs/api/reference/#get-blocked-terms */
 	export async function GetBlockedTerms(client_id: string, access_token: string, query: RequestQuery.GetBlockedTerms, init?: RequestInitUndici) {
 		try {
@@ -692,9 +699,11 @@ export namespace Request {
 			return {status: 400, message: e.toString()} as ResponseBodyError.GetBlockedTerms;
 		}
 	}
+
 	/** https://dev.twitch.tv/docs/authentication/validate-tokens/#how-to-validate-a-token */
 	export async function OAuth2Validate(access_token: string, init?: RequestInitUndici) {
 		try {
+			if (access_token.length === 0) return {status: 401, message: "invalid access token"} as ResponseBodyError.OAuth2Validate;
 			const request = await fetch(RequestParameters.OAuth2Validate.url, FetchAddToInit({headers: {"Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.OAuth2Validate.method}, init));
 			const response: any = await request.json();
 			response.status = request.status;
@@ -703,6 +712,18 @@ export namespace Request {
 			return {status: 400, message: e.toString()} as ResponseBodyError.OAuth2Validate;
 		}
 	}
+
+	/** https://dev.twitch.tv/docs/authentication/revoke-tokens/#revoking-access-token */
+	export async function OAuth2Revoke(client_id: string, access_token: string, init?: RequestInitUndici) {
+		try {
+			const request = await fetch(RequestParameters.OAuth2Revoke.url, FetchAddToInit({headers: {"Content-Type": "application/x-www-form-urlencoded"}, method: RequestParameters.OAuth2Revoke.method, search: {client_id, token: access_token}}, init));
+			if (request.status === 200) return {status: 200} as ResponseBody.OAuth2Revoke;
+			else return await request.json() as ResponseBodyError.OAuth2Revoke;
+		} catch(e) {
+			return {status: 400, message: e.toString()} as ResponseBodyError.OAuth2Revoke;
+		}
+	}
+
 	/** https://dev.twitch.tv/docs/api/reference/#create-eventsub-subscription */
 	export async function CreateEventSubSubscription<Subscription extends EventSub.Subscription>(client_id: string, access_token: string, subscription: Subscription, init?: RequestInitUndici) {
 		try {
@@ -716,6 +737,7 @@ export namespace Request {
 			return {status: 400, message: e.toString()} as ResponseBodyError.CreateEventSubSubscription;
 		}
 	}
+
 	/** https://dev.twitch.tv/docs/api/reference/#get-users */
 	export async function GetUsers(client_id: string, access_token: string, query: RequestQuery.GetUsers.Any, init?: RequestInitUndici) {
 		try {
@@ -727,6 +749,7 @@ export namespace Request {
 			return {status: 400, message: e.toString()} as ResponseBodyError.GetUsers;
 		}
 	}
+
 	/** https://dev.twitch.tv/docs/api/reference/#send-chat-message */
 	export async function SendChatMessage(client_id: string, access_token: string, query: RequestQuery.SendChatMessage, init?: RequestInitUndici) {
 		try {
@@ -739,6 +762,7 @@ export namespace Request {
 			return {status: 400, message: e.toString()} as ResponseBodyError.SendChatMessage;
 		}
 	}
+
 	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
 	export async function DeleteEventSubSubscription(client_id: string, access_token: string, query: RequestQuery.DeleteEventSubSubscription, init?: RequestInitUndici) {
 		try {
