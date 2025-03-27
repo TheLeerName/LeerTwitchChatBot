@@ -1,6 +1,7 @@
 import readline from 'readline';
 import fs from 'fs';
 import { Request, RequestBody, RequestQuery, EventSub } from './types';
+import { main as ChannelList } from './channellist';
 import { main as ChannelAdd } from './channeladd';
 import { main as ChannelRemove } from './channelremove';
 import { humanizer } from 'humanize-duration';
@@ -206,6 +207,7 @@ export async function main() {
 	}
 
 	const commandsStr = "Commands:\n - " + [
+		"node dist/index.js list                 - shows added twitch channels to chatbot in CSV format",
 		"node dist/index.js add <user_login>     - adds twitch channel to chatbot",
 		"node dist/index.js add <user_id>        - adds twitch channel to chatbot",
 		"node dist/index.js remove <user_login>  - removes twitch channel to chatbot",
@@ -214,7 +216,8 @@ export async function main() {
 	].join('\n - ');
 	const commandName = process.argv[2];
 	if (commandName) {
-		if (commandName === "add") ChannelAdd();
+		if (commandName === "list") ChannelList();
+		else if (commandName === "add") ChannelAdd();
 		else if (commandName === "remove") ChannelRemove();
 		else if (commandName === "help") console.log(commandsStr);
 		else {
