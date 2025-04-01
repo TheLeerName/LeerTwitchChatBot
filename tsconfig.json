@@ -1,8 +1,9 @@
 {
 	"compilerOptions": {
-		"target": "es2021",
+		"target": "es6",
 		"module": "commonjs",
-		"outDir": "./dist",
+		"outDir": "./",
+		"rootDir": "./src",
 		"esModuleInterop": true,
 		"strict": true,
 		"moduleResolution": "node",
@@ -14,7 +15,9 @@
 		"experimentalDecorators": true,
 		"strictPropertyInitialization": false,
 		"emitDecoratorMetadata": true,
+		"removeComments": true
 	},
+	"include": ["src/**/*.ts"],
 	"exclude": [
 		"node_modules",
 		"dist"

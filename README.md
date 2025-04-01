@@ -1,3 +1,3 @@
 # BUILDING
 - `npm install`
-- `npx tsc`
+- `npm run build`

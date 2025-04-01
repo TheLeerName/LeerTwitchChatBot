@@ -1,12 +1,10 @@
+//#region imports
 import { fetch, RequestInit, RequestInitUndici } from './advanced-fetch';
+//#endregion
 
 export namespace EventSub {
 	/** An object that contains information about the connection. */
-	export interface Session<
-		Status extends string = "connected",
-		KeepaliveTimeoutSeconds extends number | null = number,
-		ReconnectURL extends string | null = null
-	> {
+	export interface Session<Status extends string = "connected", KeepaliveTimeoutSeconds extends number | null = number, ReconnectURL extends string | null = null> {
 		/** An ID that uniquely identifies this WebSocket connection. Use this ID to set the `session_id` field in all [subscription requests](https://dev.twitch.tv/docs/eventsub/manage-subscriptions#subscribing-to-events). */
 		id: string;
 		/** The connection’s status. */
@@ -45,12 +43,7 @@ export namespace EventSub {
 	}
 
 	/** Subscription-related parameters */
-	export interface Subscription<
-		Type extends string = string,
-		Version extends Subscription.Version = Subscription.Version,
-		Condition extends Subscription.Condition = Subscription.Condition,
-		Transport extends Subscription.Transport = Subscription.Transport
-	> {
+	export interface Subscription<Type extends string = string, Version extends Subscription.Version = Subscription.Version, Condition extends Subscription.Condition = Subscription.Condition, Transport extends Subscription.Transport = Subscription.Transport> {
 		/** The subscription type name. */
 		type: Type;
 		/** The subscription version. */
@@ -373,23 +366,50 @@ export namespace RequestParameters {
 }
 export const RequestParameters: Record<RequestParameters.Name, {url: string, method: RequestParameters.Method}> = {
 	/** https://dev.twitch.tv/docs/api/reference/#add-blocked-term */
-	AddBlockedTerm: {url: "https://api.twitch.tv/helix/moderation/blocked_terms", method: "POST"},
+	AddBlockedTerm: {
+		url: "https://api.twitch.tv/helix/moderation/blocked_terms",
+		method: "POST"
+	},
 	/** https://dev.twitch.tv/docs/api/reference/#remove-blocked-term */
-	RemoveBlockedTerm: {url: "https://api.twitch.tv/helix/moderation/blocked_terms", method: "DELETE"},
+	RemoveBlockedTerm: {
+		url: "https://api.twitch.tv/helix/moderation/blocked_terms",
+		method: "DELETE"
+	},
 	/** https://dev.twitch.tv/docs/api/reference/#get-blocked-terms */
-	GetBlockedTerms: {url: "https://api.twitch.tv/helix/moderation/blocked_terms", method: "GET"},
+	GetBlockedTerms: {
+		url: "https://api.twitch.tv/helix/moderation/blocked_terms",
+		method: "GET"
+	},
 	/** https://dev.twitch.tv/docs/authentication/validate-tokens/#how-to-validate-a-token */
-	OAuth2Validate: {url: "https://id.twitch.tv/oauth2/validate", method: "GET"},
+	OAuth2Validate: {
+		url: "https://id.twitch.tv/oauth2/validate",
+		method: "GET"
+	},
 	/** https://dev.twitch.tv/docs/authentication/revoke-tokens/#revoking-access-tokens */
-	OAuth2Revoke: {url: "https://id.twitch.tv/oauth2/revoke", method: "POST"},
+	OAuth2Revoke: {
+		url: "https://id.twitch.tv/oauth2/revoke",
+		method: "POST"
+	},
 	/** https://dev.twitch.tv/docs/api/reference/#get-users */
-	GetUsers: {url: "https://api.twitch.tv/helix/users", method: "GET"},
+	GetUsers: {
+		url: "https://api.twitch.tv/helix/users",
+		method: "GET"
+	},
 	/** https://dev.twitch.tv/docs/api/reference/#send-chat-message */
-	SendChatMessage: {url: "https://api.twitch.tv/helix/chat/messages", method: "POST"},
+	SendChatMessage: {
+		url: "https://api.twitch.tv/helix/chat/messages",
+		method: "POST"
+	},
 	/** https://dev.twitch.tv/docs/api/reference/#create-eventsub-subscription */
-	CreateEventSubSubscription: {url: "https://api.twitch.tv/helix/eventsub/subscriptions", method: "POST"},
+	CreateEventSubSubscription: {
+		url: "https://api.twitch.tv/helix/eventsub/subscriptions",
+		method: "POST"
+	},
 	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
-	DeleteEventSubSubscription: {url: "https://api.twitch.tv/helix/eventsub/subscriptions", method: "DELETE"},
+	DeleteEventSubSubscription: {
+		url: "https://api.twitch.tv/helix/eventsub/subscriptions",
+		method: "DELETE"
+	},
 }
 
 export namespace RequestQuery {
@@ -646,7 +666,9 @@ export namespace ResponseBodyError {
 	export type RemoveBlockedTerm = ResponseBodyError<401 | 403>;
 
 	/** https://dev.twitch.tv/docs/authentication/validate-tokens/#how-to-validate-a-token */
-	export type OAuth2Validate = ResponseBodyError<401>;
+	export interface OAuth2Validate extends ResponseBodyError<401> {
+		access_token: string;
+	}
 
 	/** https://dev.twitch.tv/docs/authentication/revoke-tokens/#revoking-access-token */
 	export type OAuth2Revoke = ResponseBodyError<404>;
@@ -707,6 +729,7 @@ export namespace Request {
 			const request = await fetch(RequestParameters.OAuth2Validate.url, FetchAddToInit({headers: {"Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.OAuth2Validate.method}, init));
 			const response: any = await request.json();
 			response.status = request.status;
+			response.access_token = access_token;
 			return response as ResponseBody.OAuth2Validate | ResponseBodyError.OAuth2Validate;
 		} catch(e) {
 			return {status: 400, message: e.toString()} as ResponseBodyError.OAuth2Validate;

@@ -1,4 +1,6 @@
+//#region imports
 import * as undici from 'undici';
+//#endregion
 
 export type HeadersInit = undici.HeadersInit;
 export type RequestInitUndici = undici.RequestInit;
