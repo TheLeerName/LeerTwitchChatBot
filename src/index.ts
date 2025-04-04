@@ -221,6 +221,17 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 				reply = `❌ Нет полномочий.`;
 			}
 		}
+		else if (command === "!title" || command === "!название") {
+			log = true;
+			if (isModerator(message.payload)) {
+				const title = text.substring(command.length + 1);
+				const response = await Request.ModifyChannelInformation(client_id, session.access_token, {broadcaster_id: session.channel_id}, {title});
+				logmessage += `\n\tresponse_modifychannelinformation: ${JSON.stringify(response)}`;
+				reply = response.status === 204 ? `✅ Название изменено на ${title} (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! ${response.message}`;
+			} else {
+				reply = `❌ Нет полномочий.`;
+			}
+		}
 
 		if (reply) logmessage += `\n\treply_text: ${reply}\n\tresponse_sendchatmessage: ${JSON.stringify(await Request.SendChatMessage(client_id, data.bot_access_token, {broadcaster_id: session.channel_id, sender_id: bot_id, message: reply, reply_parent_message_id: message.payload.event.message_id}))}`;
 		if (log) console.log(`${logmessage}\n`);
