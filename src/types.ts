@@ -30,11 +30,7 @@ export namespace EventSub {
 	}
 	export namespace Metadata {
 		/** An object that identifies the subscription message. */
-		export interface Subscription<
-			MessageType extends string = string,
-			SubscriptionType extends string = string,
-			SubscriptionVersion extends Subscription.Version = Subscription.Version
-		> extends Metadata<MessageType> {
+		export interface Subscription<MessageType extends string = string, SubscriptionType extends string = string, SubscriptionVersion extends Subscription.Version = Subscription.Version> extends Metadata<MessageType> {
 			/** The type of event sent in the message. */
 			subscription_type: SubscriptionType;
 			/** The version number of the subscription type's definition. This is the same value specified in the subscription request. */
@@ -67,11 +63,6 @@ export namespace EventSub {
 				/** The User ID to read chat as. */
 				user_id: string;
 			}
-			/**
-			 * @param broadcaster_user_id The User ID of the channel to receive chat message events for.
-			 * @param user_id The User ID to read chat as.
-			 */
-			export function ChannelChatMessage(broadcaster_user_id: string, user_id: string): ChannelChatMessage {return {broadcaster_user_id, user_id}}
 		}
 
 		/** Defines the transport details that you want Twitch to use when sending you event notifications. */
@@ -99,7 +90,7 @@ export namespace EventSub {
 		/** The `channel.chat.message` subscription type sends a notification when any user sends a message to a channel’s chat room. [Read More](https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/#channelchatmessage) */
 		export type ChannelChatMessage = Subscription<"channel.chat.message", "1", Condition.ChannelChatMessage, Transport>;
 		export function ChannelChatMessage(session_id: string, broadcaster_user_id: string, user_id: string): ChannelChatMessage {
-			return {type: "channel.chat.message", version: "1", condition: Condition.ChannelChatMessage(broadcaster_user_id, user_id), transport: Transport(session_id)}
+			return {type: "channel.chat.message", version: "1", condition: {broadcaster_user_id, user_id}, transport: Transport(session_id)}
 		}
 	}
 
@@ -361,8 +352,8 @@ export namespace EventSub {
 }
 
 export namespace RequestParameters {
-	export type Name = "AddBlockedTerm" | "RemoveBlockedTerm" | "GetBlockedTerms" | "OAuth2Validate" | "OAuth2Revoke" | "GetUsers" | "SendChatMessage" | "CreateEventSubSubscription" | "DeleteEventSubSubscription";
-	export type Method = "GET" | "POST" | "DELETE";
+	export type Name = "AddBlockedTerm" | "RemoveBlockedTerm" | "GetBlockedTerms" | "OAuth2Validate" | "OAuth2Revoke" | "GetUsers" | "SendChatMessage" | "CreateEventSubSubscription" | "DeleteEventSubSubscription" | "ModifyChannelInformation" | "SearchCategories";
+	export type Method = "GET" | "POST" | "DELETE" | "PATCH";
 }
 export const RequestParameters: Record<RequestParameters.Name, {url: string, method: RequestParameters.Method}> = {
 	/** https://dev.twitch.tv/docs/api/reference/#add-blocked-term */
@@ -410,6 +401,16 @@ export const RequestParameters: Record<RequestParameters.Name, {url: string, met
 		url: "https://api.twitch.tv/helix/eventsub/subscriptions",
 		method: "DELETE"
 	},
+	/** https://dev.twitch.tv/docs/api/reference/#modify-channel-information */
+	ModifyChannelInformation: {
+		url: "https://api.twitch.tv/helix/channels",
+		method: "PATCH"
+	},
+	/** https://dev.twitch.tv/docs/api/reference/#search-categories */
+	SearchCategories: {
+		url: "https://api.twitch.tv/helix/search/categories",
+		method: "GET"
+	},
 }
 
 export namespace RequestQuery {
@@ -420,14 +421,12 @@ export namespace RequestQuery {
 		/** The ID of the broadcaster or a user that has permission to moderate the broadcaster’s chat room. This ID must match the user ID in the user access token. */
 		moderator_id: string;
 	}
-	export function AddBlockedTerm(broadcaster_id: string, moderator_id: string): AddBlockedTerm {return {broadcaster_id, moderator_id}}
 
 	/** https://dev.twitch.tv/docs/api/reference/#remove-blocked-term */
 	export interface RemoveBlockedTerm extends AddBlockedTerm {
 		/** The ID of the blocked term to remove from the broadcaster’s list of blocked terms. */
 		id: string;
 	}
-	export function RemoveBlockedTerm(broadcaster_id: string, moderator_id: string, id: string): RemoveBlockedTerm {return {broadcaster_id, moderator_id, id}}
 
 	/** https://dev.twitch.tv/docs/api/reference/#get-blocked-terms */
 	export interface GetBlockedTerms extends AddBlockedTerm {
@@ -436,7 +435,6 @@ export namespace RequestQuery {
 		/** The cursor used to get the next page of results. The Pagination object in the response contains the cursor’s value. */
 		after?: string;
 	}
-	export function GetBlockedTerms(broadcaster_id: string, moderator_id: string, first?: string, after?: string): GetBlockedTerms {return {broadcaster_id, moderator_id, first, after}}
 
 	/** https://dev.twitch.tv/docs/api/reference/#get-users */
 	export namespace GetUsers {
@@ -446,13 +444,11 @@ export namespace RequestQuery {
 			/** The ID of the user to get. To specify more than one user, include the id parameter for each user to get. For example, `id=1234&id=5678`. The maximum number of IDs you may specify is 100. */
 			id: string;
 		}
-		export function ByID(id: string): ByID {return {id}}
 		/** https://dev.twitch.tv/docs/api/reference/#get-users */
 		export interface ByLogin {
 			/** The login name of the user to get. To specify more than one user, include the login parameter for each user to get. For example, `login=foo&login=bar`. The maximum number of login names you may specify is 100. */
 			login: string;
 		}
-		export function ByLogin(login: string): ByLogin {return {login}}
 	}
 
 	/** https://dev.twitch.tv/docs/api/reference/#send-chat-message */
@@ -466,14 +462,28 @@ export namespace RequestQuery {
 		/** The ID of the chat message being replied to. */
 		reply_parent_message_id?: string;
 	}
-	export function SendChatMessage(broadcaster_id: string, sender_id: string, message: string, reply_parent_message_id?: string): SendChatMessage {return {broadcaster_id, sender_id, message, reply_parent_message_id}}
 
 	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
 	export interface DeleteEventSubSubscription {
 		/** The ID of the subscription to delete. */
 		id: string;
 	}
-	export function DeleteEventSubSubscription(id: string) {return {id}}
+
+	/** https://dev.twitch.tv/docs/api/reference/#modify-channel-information */
+	export interface ModifyChannelInformation {
+		/** The ID of the broadcaster whose channel you want to update. This ID must match the user ID in the user access token. */
+		broadcaster_id: string;
+	}
+
+	/** https://dev.twitch.tv/docs/api/reference/#search-categories */
+	export interface SearchCategories {
+		/** The search string. */
+		query: string;
+		/** The maximum number of items to return per page in the response. The minimum page size is 1 item per page and the maximum is 100 items per page. The default is 20. */
+		first?: number;
+		/** The cursor used to get the next page of results. The **Pagination** object in the response contains the cursor’s value. [Read More](https://dev.twitch.tv/docs/api/guide#pagination) */
+		after?: string;
+	}
 }
 
 export namespace RequestBody {
@@ -482,7 +492,29 @@ export namespace RequestBody {
 		/** The word or phrase to block from being used in the broadcaster’s chat room. The term must contain a minimum of 2 characters and may contain up to a maximum of 500 characters. Terms may include a wildcard character (*). The wildcard character must appear at the beginning or end of a word or set of characters. For example, `*foo` or `foo*`. If the blocked term already exists, the response contains the existing blocked term. */
 		text: string;
 	}
-	export function AddBlockedTerm(text: string): AddBlockedTerm {return {text}}
+
+	/** https://dev.twitch.tv/docs/api/reference/#modify-channel-information */
+	export interface ModifyChannelInformation {
+		/** The ID of the game that the user plays. The game is not updated if the ID isn’t a game ID that Twitch recognizes. To unset this field, use “0” or “” (an empty string). */
+		game_id?: string;
+		/** The user’s preferred language. Set the value to an ISO 639-1 two-letter language code (for example, en for English). Set to “other” if the user’s preferred language is not a Twitch supported language. The language isn’t updated if the language code isn’t a Twitch supported language. */
+		broadcaster_language?: string;
+		/** The title of the user’s stream. You may not set this field to an empty string. */
+		title?: string;
+		/** The number of seconds you want your broadcast buffered before streaming it live. The delay helps ensure fairness during competitive play. Only users with Partner status may set this field. The maximum delay is 900 seconds (15 minutes). */
+		delay?: number;
+		/** A list of channel-defined tags to apply to the channel. To remove all tags from the channel, set tags to an empty array. Tags help identify the content that the channel streams. A channel may specify a maximum of 10 tags. Each tag is limited to a maximum of 25 characters and may not be an empty string or contain spaces or special characters. Tags are case insensitive. For readability, consider using camelCasing or PascalCasing. [Learn More](https://help.twitch.tv/s/article/guide-to-tags) */
+		tags?: string[];
+		/** List of labels that should be set as the Channel’s CCLs. */
+		content_classification_labels?: {
+			/** ID of the Content Classification Labels that must be added/removed from the channel. */
+			id: "DebatedSocialIssuesAndPolitics" | "DrugsIntoxication" | "SexualThemes" | "ViolentGraphic" | "Gambling" | "ProfanityVulgarity";
+			/** Boolean flag indicating whether the label should be enabled (true) or disabled for the channel. */
+			is_enabled: boolean;
+		}[];
+		/** Boolean flag indicating if the channel has branded content. */
+		is_branded_content?: boolean;
+	}
 }
 
 export interface ResponseBody<Status extends number = 200> {
@@ -649,9 +681,25 @@ export namespace ResponseBody {
 
 	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
 	export type DeleteEventSubSubscription = ResponseBody<204>;
+
+	/** https://dev.twitch.tv/docs/api/reference/#modify-channel-information */
+	export type ModifyChannelInformation = ResponseBody<204>;
+
+	/** https://dev.twitch.tv/docs/api/reference/#search-categories */
+	export interface SearchCategories extends ResponseBody<200> {
+		/** The list of games or categories that match the query. The list is empty if there are no matches. */
+		data: {
+			/** A URL to an image of the game’s box art or streaming category. */
+			box_art_url: string;
+			/** The name of the game or category. */
+			name: string;
+			/** An ID that uniquely identifies the game or category. */
+			id: string;
+		}[];
+	}
 }
 
-export interface ResponseBodyError<Status extends number = number> extends ResponseBody<400 | Status> {
+export interface ResponseBodyError<Status extends number = number> extends ResponseBody<400 | Status | 500> {
 	/** The error message of request. */
 	message: string;
 }
@@ -684,6 +732,12 @@ export namespace ResponseBodyError {
 
 	/** https://dev.twitch.tv/docs/api/reference/#delete-eventsub-subscription */
 	export type DeleteEventSubSubscription = ResponseBodyError<401 | 404>;
+
+	/** https://dev.twitch.tv/docs/api/reference/#modify-channel-information */
+	export type ModifyChannelInformation = ResponseBodyError<401 | 403 | 409>;
+
+	/** https://dev.twitch.tv/docs/api/reference/#search-categories */
+	export type SearchCategories = ResponseBodyError<401>;
 }
 
 export namespace Request {
@@ -796,6 +850,30 @@ export namespace Request {
 			return {status: 400, message: e.toString()} as ResponseBodyError.DeleteEventSubSubscription;
 		}
 	}
+
+	/** https://dev.twitch.tv/docs/api/reference/#modify-channel-information */
+	export async function ModifyChannelInformation(client_id: string, access_token: string, query: RequestQuery.ModifyChannelInformation, body: RequestBody.ModifyChannelInformation, init?: RequestInitUndici) {
+		try {
+			if (Object.keys(body).length === 0) throw `You must specify at least one field in request body!`;
+			const request = await fetch(RequestParameters.ModifyChannelInformation.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.ModifyChannelInformation.method, search: query, body: JSON.stringify(body)}, init));
+			if (request.status === 204) return {status: 204} as ResponseBody.ModifyChannelInformation;
+			else return await request.json() as ResponseBodyError.ModifyChannelInformation;
+		} catch(e) {
+			return {status: 400, message: e.toString()} as ResponseBodyError.ModifyChannelInformation;
+		}
+	}
+
+	/** https://dev.twitch.tv/docs/api/reference/#search-categories */
+	export async function SearchCategories(client_id: string, access_token: string, query: RequestQuery.SearchCategories, init?: RequestInitUndici) {
+		try {
+			const request = await fetch(RequestParameters.SearchCategories.url, FetchAddToInit({headers: {"Client-Id": client_id, "Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.SearchCategories.method, search: query}, init));
+			const response: any = await request.json();
+			response.status = request.status;
+			return response as ResponseBody.SearchCategories | ResponseBodyError.SearchCategories;
+		} catch(e) {
+			return {status: 400, message: e.toString()} as ResponseBodyError.SearchCategories;
+		}
+	} 
 }
 
 function FetchAddToInit(OriginalInit?: RequestInit, AddInit?: RequestInitUndici): RequestInit {

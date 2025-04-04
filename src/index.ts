@@ -150,7 +150,7 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 			if (isModerator(message.payload)) {
 				const term = text.substring(command.length + 1);
 				if (term.length > 1) {
-					const response = await Request.AddBlockedTerm(client_id, session.access_token, RequestQuery.AddBlockedTerm(session.channel_id, session.channel_id), RequestBody.AddBlockedTerm(term));
+					const response = await Request.AddBlockedTerm(client_id, session.access_token, {broadcaster_id: session.channel_id, moderator_id: session.channel_id}, {text: term});
 					logmessage += `\n\tresponse_addblockedterm: ${JSON.stringify(response)}`;
 					reply = response.status === 200 ? `✅ Успешно! (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! (${response.message})`;
 				} else {
@@ -165,13 +165,13 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 			if (isModerator(message.payload)) {
 				const term = text.substring(command.length + 1);
 				if (term.length > 1) {
-					let response = await Request.GetBlockedTerms(client_id, session.access_token, RequestQuery.GetBlockedTerms(session.channel_id, session.channel_id));
+					let response = await Request.GetBlockedTerms(client_id, session.access_token, {broadcaster_id: session.channel_id, moderator_id: session.channel_id});
 					logmessage += `\n\tresponse_getblockedterms: ${JSON.stringify(response)}`;
 					if (response.status === 200) {
 						let id: string | null = null;
 						for (let entry of response.data) if (entry.text === term) id = entry.id;
 						if (id) {
-							let response = await Request.RemoveBlockedTerm(client_id, session.access_token, RequestQuery.RemoveBlockedTerm(session.channel_id, session.channel_id, id));
+							let response = await Request.RemoveBlockedTerm(client_id, session.access_token, {broadcaster_id: session.channel_id, moderator_id: session.channel_id, id});
 							logmessage += `\n\tresponse_removeblockedterm: ${JSON.stringify(response)}`;
 							if (response.status === 204) {
 								reply = `✅ Успешно! (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)`;
@@ -192,8 +192,37 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 			log = true;
 			reply = isModerator(message.payload) ? `📜 https://dashboard.twitch.tv/u/${session.login}/settings/moderation/blocked-terms` : `❌ Нет полномочий.`;
 		}
+		else if (command === "!игра") {
+			log = true;
+			if (isModerator(message.payload)) {
+				var game = text.substring(command.length + 1).toLowerCase();
+				var game_id: string | null = null;
+				if (game === "общение" || game === "just chatting") game_id = "509658";
+				else {
+					const response = await Request.SearchCategories(client_id, session.access_token, {query: game, first: 1});
+					logmessage += `\n\tresponse_searchcategories: ${JSON.stringify(response)}`;
+					if (response.status === 200) {
+						if (response.data.length > 0) {
+							game = response.data[0].name;
+							game_id = response.data[0].id;
+						} else
+							reply = `❌ Игра не найдена!`;
+					}
+					else
+						reply = `❌ Ошибка! ${response.message}`;
+				}
 
-		if (reply) logmessage += `\n\treply_text: ${reply}\n\tresponse_sendchatmessage: ${JSON.stringify(await Request.SendChatMessage(client_id, data.bot_access_token, RequestQuery.SendChatMessage(session.channel_id, bot_id, reply, message.payload.event.message_id)))}`;
+				if (game_id) {
+					const response = await Request.ModifyChannelInformation(client_id, session.access_token, {broadcaster_id: session.channel_id}, {game_id});
+					logmessage += `\n\tresponse_modifychannelinformation: ${JSON.stringify(response)}`;
+					reply = response.status === 204 ? `✅ Игра изменена на: ${game} (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! ${response.message}`;
+				}
+			} else {
+				reply = `❌ Нет полномочий.`;
+			}
+		}
+
+		if (reply) logmessage += `\n\treply_text: ${reply}\n\tresponse_sendchatmessage: ${JSON.stringify(await Request.SendChatMessage(client_id, data.bot_access_token, {broadcaster_id: session.channel_id, sender_id: bot_id, message: reply, reply_parent_message_id: message.payload.event.message_id}))}`;
 		if (log) console.log(`${logmessage}\n`);
 	}
 }
@@ -283,7 +312,7 @@ async function validateAccessToken(rl: readline.Interface | null, scopes: string
 async function runFor(channel_id: string, entry: DataChannelsEntry) {
 	if (entry.subscriptions_id.length > 0) {
 		for (let id of entry.subscriptions_id)
-			console.log(`Previous subscription deleted\n\tid: ${id}\n\tresponse: ${JSON.stringify(await Request.DeleteEventSubSubscription(client_id, entry.access_token, RequestQuery.DeleteEventSubSubscription(id)))}\n`);
+			console.log(`Previous subscription deleted\n\tid: ${id}\n\tresponse: ${JSON.stringify(await Request.DeleteEventSubSubscription(client_id, entry.access_token, {id}))}\n`);
 		entry.subscriptions_id = [];
 	}
 
