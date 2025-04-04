@@ -107,7 +107,7 @@ async function onSessionWelcome(session: Session, message: EventSub.Message.Sess
 
 	session.eventsub = message.payload.session;
 	if (!session.reconnect_url) {
-		const response = await Request.CreateEventSubSubscription(client_id, session.access_token, EventSub.Subscription.ChannelChatMessage(session.eventsub.id, session.channel_id, session.channel_id));
+		const response = await Request.CreateEventSubSubscription(client_id, data.bot_access_token, EventSub.Subscription.ChannelChatMessage(session.eventsub.id, session.channel_id, bot_id));
 		if (response.status === 202) {
 			data.channels[session.channel_id].subscriptions_id.push(response.data.id);
 			saveData();
@@ -137,11 +137,11 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 		var log = false;
 		var logmessage = `Got message\n\tchannel: ${session.login}\n\ttype: ${message.metadata.message_type} (${message.payload.subscription.type})\n\tpayload_event: ${JSON.stringify(message.payload.event)}\n\tchatter: ${message.payload.event.chatter_user_name}\n\ttext: ${text}`;
 
-		if (command === "!пинг") {
+		if (command === "!ping" || command === "!пинг") {
 			log = true;
 			reply = `🏓 Понг! (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)`;
 		}
-		else if (command === "!аптайм") {
+		else if (command === "!uptime" || command === "!аптайм") {
 			log = true;
 			reply = `⏱️ ${HumanizeDuration(new Date(message.payload.subscription.created_at).getTime() - Date.now())}`;
 		}
@@ -192,7 +192,7 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 			log = true;
 			reply = isModerator(message.payload) ? `📜 https://dashboard.twitch.tv/u/${session.login}/settings/moderation/blocked-terms` : `❌ Нет полномочий.`;
 		}
-		else if (command === "!игра") {
+		else if (command === "!game" || command === "!игра") {
 			log = true;
 			if (isModerator(message.payload)) {
 				var game = text.substring(command.length + 1).toLowerCase();
@@ -215,7 +215,7 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 				if (game_id) {
 					const response = await Request.ModifyChannelInformation(client_id, session.access_token, {broadcaster_id: session.channel_id}, {game_id});
 					logmessage += `\n\tresponse_modifychannelinformation: ${JSON.stringify(response)}`;
-					reply = response.status === 204 ? `✅ Игра изменена на: ${game} (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! ${response.message}`;
+					reply = response.status === 204 ? `✅ Игра изменена на ${game} (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! ${response.message}`;
 				}
 			} else {
 				reply = `❌ Нет полномочий.`;
@@ -237,7 +237,8 @@ async function onSessionReconnect(session: Session, message: EventSub.Message.Se
 export async function getAccessToken(rl: readline.Interface, scopes: string[], channel_id: string): Promise<ResponseBody.OAuth2Validate> {
 	console.log(`Authorize app: https://id.twitch.tv/oauth2/authorize?response_type=token&client_id=${client_id}&redirect_uri=${redirect_uri}&scope=${scopes.join('%20')}`);
 
-	var link = await new Promise<string>(resolve => rl.question(`Insert link here (example: ${redirect_uri}#access_token=dsfalg34jd34gsdk3): `, answer => resolve(link)));
+	var link = "";
+	await new Promise<void>(resolve => rl.question(`Insert link here (example: ${redirect_uri}#access_token=dsfalg34jd34gsdk3): `, answer => { link = answer; resolve(); }));
 
 	console.log("");
 
@@ -254,22 +255,21 @@ export async function getAccessToken(rl: readline.Interface, scopes: string[], c
 		for (let k_v of link.split("&")) {
 			const [k, access_token] = k_v.split("=", 2);
 			if (k === "access_token") {
-				console.log(`Saving access token...\n\ttoken: ${access_token}`);
+				console.log(`Saving access token...`);
 				const response = await Request.OAuth2Validate(access_token);
-				console.log(`\tvalidate_response: ${JSON.stringify(response)}`);
+				console.log(`\tvalidate_response: ${JSON.stringify(response)}\n`);
 				if (response.status === 200) {
-					console.log(`\ttoken_owner_id: ${response.user_id}\n`);
 					if (response.user_id !== channel_id) {
 						await Request.OAuth2Revoke(client_id, access_token);
-						throw `\nAccess token belongs to other channel!`;
+						throw `Access token belongs to other channel!`;
 					}
 					if (response.client_id !== client_id) {
 						await Request.OAuth2Revoke(response.client_id, access_token);
-						throw `\nAccess token belongs to other client_id!`;
+						throw `Access token belongs to other client_id!`;
 					}
 					return response;
 				} else
-					throw `\nRequest.OAuth2Validate failed!`;
+					throw `Request.OAuth2Validate failed!`;
 			}
 		}
 
@@ -323,7 +323,10 @@ async function main() {
 	//#region parsing data.json and setting fields to data
 	try {
 		if (fs.existsSync('data.json')) {
-			for (let [id, entry] of Object.entries(JSON.parse(fs.readFileSync('data.json').toString())))
+			const json = JSON.parse(fs.readFileSync('data.json').toString());
+			data.bot_access_token = json.bot_access_token;
+			data.bot_login = json.bot_login;
+			for (let [id, entry] of Object.entries(json.channels))
 				(data.channels as any)[id] = entry;
 		}
 	}
@@ -362,14 +365,19 @@ async function main() {
 		return;
 	}
 	//#endregion
-	//#region validating access token of channels
+	//#region validating access token of channels and running websockets
+	var connected = false;
 	for (let [channel_id, entry] of Object.entries(data.channels)) {
-		const response = channel_id === bot_id ? response_bot : await validateAccessToken(rl, scopes, channel_id, entry.login, entry.access_token);
+		const response = await validateAccessToken(rl, scopes, channel_id, entry.login, entry.access_token);
 		entry.access_token = response.access_token;
 		entry.login = response.login;
 		rl = response.rl;
 		await runFor(channel_id, entry);
+		connected = true;
 	}
+
+	if (!connected)
+		console.error(`No channels to connect!`);
 	//#endregion
 
 	if (rl) rl.close();

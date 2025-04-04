@@ -779,7 +779,7 @@ export namespace Request {
 	/** https://dev.twitch.tv/docs/authentication/validate-tokens/#how-to-validate-a-token */
 	export async function OAuth2Validate(access_token: string, init?: RequestInitUndici) {
 		try {
-			if (access_token.length === 0) return {status: 401, message: "invalid access token"} as ResponseBodyError.OAuth2Validate;
+			if (!(access_token?.length > 0)) return {status: 401, message: "invalid access token"} as ResponseBodyError.OAuth2Validate;
 			const request = await fetch(RequestParameters.OAuth2Validate.url, FetchAddToInit({headers: {"Authorization": `Bearer ${access_token}`, "Content-Type": "application/json"}, method: RequestParameters.OAuth2Validate.method}, init));
 			const response: any = await request.json();
 			response.status = request.status;

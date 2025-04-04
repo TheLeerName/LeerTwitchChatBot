@@ -7,11 +7,14 @@ import { Request } from './types';
 export async function main() {
 	try {
 		if (process.argv[3]) {
+			console.log(`Adding channel ${process.argv[3]}...`);
 			const response = await Request.GetUsers(client_id, data.bot_access_token, process.argv[3] === `${parseInt(process.argv[3])}` ? {id: process.argv[3]} : {login: process.argv[3].toLowerCase()});
 			if (response.status !== 200) throw response.message;
+			else console.log(`\tresponse_getusers: ${JSON.stringify(response)}`);
 
 			if (response.data.length > 0) {
-				const {id} = response.data[0];
+				const {id, login} = response.data[0];
+				console.log(`\tchannel_id: ${id}\n\nCreating link for getting access token for channel ${login}...`);
 				const rl = readline.createInterface({input: process.stdin, output: process.stdout});
 				const response2 = await getAccessToken(rl, scopes, id);
 				data.channels[id] = {
@@ -19,6 +22,7 @@ export async function main() {
 					access_token: response2.access_token,
 					subscriptions_id: []
 				};
+				rl.close();
 				saveData();
 				console.log(`Channel was added to bot! Restart the bot to see changes`);
 			}
