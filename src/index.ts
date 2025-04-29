@@ -256,7 +256,7 @@ async function getAuthorization<S extends Authorization.Scope[]>(rl: readline.In
 			const authorization = Authorization.fromResponseBodyOAuth2Validate(response);
 			if (authorization.type !== "user") throw "bro how the fuck r u created app access token with implicit grant flow???";
 
-			if (authorization.user_id !== user.login) {
+			if (authorization.user_login !== user.login) {
 				const response = await Request.OAuth2Revoke(authorization);
 				console.log(`\trevoke: ${JSON.stringify(response)}`);
 				throw `Access token belongs to other channel!`;
