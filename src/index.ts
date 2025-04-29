@@ -58,7 +58,7 @@ function isModerator(payload: EventSub.Payload.ChannelChatMessage): boolean {
 }
 
 /** Parses `session_welcome` message: sets gotten payload session to `session.eventsub` */
-async function onSessionWelcome(connection: EventSub.Connection, message: EventSub.Message.SessionWelcome, is_reconnected: boolean) {
+async function onSessionWelcome(connection: EventSub.Connection<typeof scopes>, message: EventSub.Message.SessionWelcome, is_reconnected: boolean) {
 	var logmessage = `Got message\n\tchannel: ${connection.authorization.user_login}\n\ttype: ${message.metadata.message_type}\n\tpayload_session: ${JSON.stringify(message.payload.session)}`;
 
 	if (!is_reconnected) {
@@ -77,7 +77,7 @@ function getPing(message_timestamp: string) {
 }
 
 /** Parses `notification` message of `channel.chat.message` event: handles commands (if any) */
-async function onNotification(connection: EventSub.Connection, message: EventSub.Message.Notification) {
+async function onNotification(connection: EventSub.Connection<typeof scopes>, message: EventSub.Message.Notification) {
 	if (EventSub.Message.Notification.isChannelChatMessage(message)) {
 		if (message.payload.event.message_type !== "text") return;
 
@@ -287,6 +287,9 @@ async function getAuthorization<S extends Authorization.Scope[]>(rl: readline.In
 				console.log(`\trevoke: ${JSON.stringify(response)}`);
 				throw `Access token belongs to other client_id!`;
 			}
+
+			user.token = token;
+			user.login = authorization.user_login;
 
 			return {authorization, rl};
 		}
