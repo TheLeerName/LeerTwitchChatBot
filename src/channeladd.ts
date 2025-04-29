@@ -46,7 +46,8 @@ export async function main() {
 
 				data.channels[id] = {
 					user: { token, login: authorization.user_login },
-					subscriptions_id: []
+					subscriptions_id: [],
+					chatters_watchtime: {}
 				};
 				saveData();
 				console.log(`Channel was added to bot! Restart the bot to see changes`);

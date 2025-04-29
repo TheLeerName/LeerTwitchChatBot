@@ -18,7 +18,8 @@ export const bot_scopes = [
 export const scopes = [
 	"moderator:manage:blocked_terms",
 	"channel:manage:broadcast",
-	"moderator:read:followers"
+	"moderator:read:followers",
+	"moderator:read:chatters",
 ] as const satisfies Authorization.Scope[];
 //#endregion
 
@@ -30,6 +31,8 @@ interface User {
 export interface DataChannelsEntry {
 	user: User;
 	subscriptions_id: string[];
+	// <user_id>: <minutes>
+	chatters_watchtime: Record<string, number>;
 }
 interface Data {
 	bot: User;
@@ -43,6 +46,7 @@ export var bot_authorization: Authorization.User<typeof bot_scopes>;
 const WebSocketSSLURL = "wss://eventsub.wss.twitch.tv/ws";
 const redirect_uri = "http://localhost";
 const connections: Record<string, EventSub.Connection> = {};
+const polling_watchtime_interval: Record<string, NodeJS.Timeout> = {};
 const HumanizeDuration = humanizer({largest: 3, round: true, delimiter: " ", language: "ru"});
 //#endregion
 
@@ -57,17 +61,44 @@ function isModerator(payload: EventSub.Payload.ChannelChatMessage): boolean {
 	return false;
 }
 
+async function saveChattersWatchTime(connection: EventSub.Connection<typeof scopes>) {
+	const response = await Request.GetChatters(connection.authorization, connection.authorization.user_id);
+	if (response.ok) {
+		for (const entry of response.data) {
+			const chatters_watchtime = data.channels[connection.authorization.user_id].chatters_watchtime;
+			if (!chatters_watchtime[entry.user_id]) chatters_watchtime[entry.user_id] = 0;
+			else chatters_watchtime[entry.user_id]++;
+		}
+		saveData();
+	} else {
+		console.error(`Request.GetChatters failed!\n\tcode: ${response.status}\n\terror: ${response.message}`);
+	}
+}
+
 /** Parses `session_welcome` message: sets gotten payload session to `session.eventsub` */
 async function onSessionWelcome(connection: EventSub.Connection<typeof scopes>, message: EventSub.Message.SessionWelcome, is_reconnected: boolean) {
 	var logmessage = `Got message\n\tchannel: ${connection.authorization.user_login}\n\ttype: ${message.metadata.message_type}\n\tpayload_session: ${JSON.stringify(message.payload.session)}`;
 
 	if (!is_reconnected) {
 		const response = await Request.CreateEventSubSubscription(bot_authorization, EventSub.Subscription.ChannelChatMessage({ transport: connection.transport, user_id: bot_authorization.user_id }, connection.authorization.user_id));
+		logmessage += `\n\tsubscription: ${JSON.stringify(response)}`;
 		if (response.ok) {
 			data.channels[connection.authorization.user_id].subscriptions_id.push(response.data.id);
-			saveData();
 		}
-		logmessage += `\n\tsubscription: ${JSON.stringify(response)}`;
+
+		const response1 = await Request.CreateEventSubSubscription(bot_authorization, EventSub.Subscription.StreamOnline({ transport: connection.transport }, connection.authorization.user_id));
+		logmessage += `\n\tsubscription: ${JSON.stringify(response1)}`;
+		if (response1.ok) data.channels[connection.authorization.user_id].subscriptions_id.push(response1.data.id);
+
+		const response2 = await Request.CreateEventSubSubscription(bot_authorization, EventSub.Subscription.StreamOffline({ transport: connection.transport }, connection.authorization.user_id));
+		logmessage += `\n\tsubscription: ${JSON.stringify(response2)}`;
+		if (response2.ok) data.channels[connection.authorization.user_id].subscriptions_id.push(response2.data.id);
+
+		const response3 = await Request.GetStreams(bot_authorization, connection.authorization.user_id, undefined, undefined, "live");
+		logmessage += `\n\tgetstreams_start_polling_watchtime: ${JSON.stringify(response2)}`;
+		if (response3.ok && response3.data.length > 0) polling_watchtime_interval[connection.authorization.user_id] = setInterval(() => saveChattersWatchTime(connection), 60_000);
+
+		saveData();
 	}
 	console.log(`${logmessage}\n`);
 }
@@ -204,9 +235,32 @@ async function onNotification(connection: EventSub.Connection<typeof scopes>, me
 				reply = `❌ Пользователя не существует.`;
 			}
 		}
+		else if (command === "!watchtime" || command === "!времяпросмотра") {
+			log = true;
+
+			const login = text.length > command.length ? text.substring(command.length + 1) : message.payload.event.chatter_user_login;
+			const response = await Request.GetUsers(connection.authorization, { login });
+			logmessage += `\n\tgetusers: ${JSON.stringify(response)}`;
+
+			if (response.ok && response.data.length > 0) {
+				const watchtime = data.channels[connection.authorization.user_id].chatters_watchtime[response.data[0].id];
+				reply = watchtime ? `👀 Время просмотра ${response.data[0].display_name} составляет ${HumanizeDuration(Date.now() - watchtime * 60000)}!` : `❌ ${response.data[0].display_name} не смотрит этот канал.`;
+			}
+			else {
+				reply = `❌ Пользователя не существует.`;
+			}
+		}
 
 		if (reply) logmessage += `\n\treply_text: ${reply}\n\tsendchatmessage: ${JSON.stringify(await Request.SendChatMessage(bot_authorization, connection.authorization.user_id, reply, message.payload.event.message_id))}`;
 		if (log) console.log(`${logmessage}\n`);
+	}
+	else if (EventSub.Message.Notification.isStreamOnline(message)) {
+		if (polling_watchtime_interval[connection.authorization.user_id]) clearInterval(polling_watchtime_interval[connection.authorization.user_id]);
+		polling_watchtime_interval[connection.authorization.user_id] = setInterval(() => saveChattersWatchTime(connection), 60_000);
+	}
+	else if (EventSub.Message.Notification.isStreamOffline(message) && polling_watchtime_interval[connection.authorization.user_id]) {
+		clearInterval(polling_watchtime_interval[connection.authorization.user_id]);
+		delete polling_watchtime_interval[connection.authorization.user_id];
 	}
 }
 
