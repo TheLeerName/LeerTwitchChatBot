@@ -1,8 +1,7 @@
 //#region imports
 import readline from 'readline';
-import fs from 'fs';
-import { fetch } from './advanced-fetch';
-import { Request, RequestBody, RequestQuery, EventSub, ResponseBody, ResponseBodyError } from './types';
+import fs, { read } from 'fs';
+import { Request, EventSub, Authorization } from 'twitch.ts';
 import { main as ChannelList } from './channellist';
 import { main as ChannelAdd } from './channeladd';
 import { main as ChannelRemove } from './channelremove';
@@ -15,41 +14,34 @@ export const bot_id = "238330860";
 export const bot_scopes = [
 	"user:read:chat",
 	"user:write:chat"
-];
+] as const satisfies Authorization.Scope[];
 export const scopes = [
 	"moderator:manage:blocked_terms",
 	"channel:manage:broadcast",
-];
+] as const satisfies Authorization.Scope[];
 //#endregion
 
 //#region interfaces
-export interface DataChannelsEntry {
+interface User {
+	token: string;
 	login: string;
-	access_token: string;
+}
+export interface DataChannelsEntry {
+	user: User;
 	subscriptions_id: string[];
 }
 interface Data {
-	bot_access_token: string;
-	bot_login: string;
+	bot: User;
 	channels: Record<string, DataChannelsEntry>;
-}
-interface Session {
-	ws: WebSocket;
-	channel_id: string;
-	login: string;
-	access_token: string;
-
-	reconnect_url?: string;
-	keepalive_timeout?: NodeJS.Timeout;
-	eventsub?: EventSub.Session;
 }
 //#endregion
 
 //#region some consts which usually you dont need to edit
-export const data: Data = {bot_access_token: "", bot_login: "", channels: {}};
+export const data: Data = { bot: { token: "", login: "" }, channels: {} };
+export var bot_authorization: Authorization.User<typeof bot_scopes>;
 const WebSocketSSLURL = "wss://eventsub.wss.twitch.tv/ws";
 const redirect_uri = "http://localhost";
-const sessions: Record<string, Session> = {};
+const connections: Record<string, EventSub.Connection> = {};
 const HumanizeDuration = humanizer({largest: 3, round: true, delimiter: " ", language: "ru"});
 //#endregion
 
@@ -64,68 +56,27 @@ function isModerator(payload: EventSub.Payload.ChannelChatMessage): boolean {
 	return false;
 }
 
-/** Connects WebSocket and starts session for channel */
-function connectWebSocket(channel_id: string) {
-	let reconnect_url: string | undefined;
-	let session = sessions[channel_id];
-	if (session) {
-		reconnect_url = session.reconnect_url;
-		session.ws.close();
-		delete session.eventsub;
-		delete sessions[channel_id];
-	}
-	const entry = data.channels[channel_id];
-	session = {channel_id, login: entry.login, access_token: entry.access_token, ws: new WebSocket(reconnect_url ?? WebSocketSSLURL)};
-	if (reconnect_url) session.reconnect_url = reconnect_url;
-
-	session.ws.addEventListener('close', e => {
-		console.log(`WebSocket closed\n\tchannel: ${entry.login}\n\tcode: ${e.code}\n\treason: ${e.reason}\n`);
-		connectWebSocket(channel_id);
-	});
-	session.ws.addEventListener('message', e => onMessage(session, JSON.parse(e.data)));
-	sessions[channel_id] = session;
-	console.log(`WebSocket opened\n\tchannel: ${entry.login}\n\turl: ${session.ws.url}\n`);
-}
-
-/** Parses gotten message from WebSocket's: determines message_type and runs the corresponding function, also stops `session.keepalive_timeout` */
-async function onMessage(session: Session, data: EventSub.Message.Any) {
-	if (session.keepalive_timeout) {
-		clearTimeout(session.keepalive_timeout);
-		delete session.keepalive_timeout;
-	}
-
-	if (EventSub.Message.isSessionWelcome(data)) onSessionWelcome(session, data);
-	else if (EventSub.Message.isSessionKeepalive(data)) onSessionKeepalive(session, data);
-	else if (EventSub.Message.isNotification(data)) onNotification(session, data);
-	else if (EventSub.Message.isSessionReconnect(data)) onSessionReconnect(session, data);
-	else console.log(`Got unsupported message\n\tchannel: ${session.login}\n\ttype: ${data.metadata.message_type}\n\tdata: ${JSON.stringify(data)}\n`);
-}
-
 /** Parses `session_welcome` message: sets gotten payload session to `session.eventsub` */
-async function onSessionWelcome(session: Session, message: EventSub.Message.SessionWelcome) {
-	var logmessage = `Got message\n\tchannel: ${session.login}\n\ttype: ${message.metadata.message_type}\n\tpayload_session: ${JSON.stringify(message.payload.session)}`;
+async function onSessionWelcome(connection: EventSub.Connection, message: EventSub.Message.SessionWelcome, is_reconnected: boolean) {
+	var logmessage = `Got message\n\tchannel: ${connection.authorization.user_login}\n\ttype: ${message.metadata.message_type}\n\tpayload_session: ${JSON.stringify(message.payload.session)}`;
 
-	session.eventsub = message.payload.session;
-	if (!session.reconnect_url) {
-		const response = await Request.CreateEventSubSubscription(client_id, data.bot_access_token, EventSub.Subscription.ChannelChatMessage(session.eventsub.id, session.channel_id, bot_id));
-		if (response.status === 202) {
-			data.channels[session.channel_id].subscriptions_id.push(response.data.id);
+	if (!is_reconnected) {
+		const response = await Request.CreateEventSubSubscription(bot_authorization, EventSub.Subscription.ChannelChatMessage({ transport: connection.transport, user_id: bot_authorization.user_id }, connection.authorization.user_id));
+		if (response.ok) {
+			data.channels[connection.authorization.user_id].subscriptions_id.push(response.data.id);
 			saveData();
 		}
 		logmessage += `\n\tsubscription: ${JSON.stringify(response)}`;
-	} else
-		delete session.reconnect_url;
+	}
 	console.log(`${logmessage}\n`);
 }
 
-/** Parses `session_keepalive` message: starts `session.keepalive_timeout` */
-async function onSessionKeepalive(session: Session, message: EventSub.Message.SessionKeepalive) {
-	//console.log(`Got message\n\tchannel: ${session.login}\n\ttype: ${message.metadata.message_type}\n\tmetadata: ${JSON.stringify(message.metadata)}\n`);
-	session.keepalive_timeout = setTimeout(() => session.ws.close(4005, "session_keepalive timeout"), (session.eventsub!.keepalive_timeout_seconds + 2) * 1000);
+function getPing(message_timestamp: string) {
+	return Date.now() - new Date(message_timestamp).getTime();
 }
 
 /** Parses `notification` message of `channel.chat.message` event: handles commands (if any) */
-async function onNotification(session: Session, message: EventSub.Message.Notification) {
+async function onNotification(connection: EventSub.Connection, message: EventSub.Message.Notification) {
 	if (EventSub.Message.Notification.isChannelChatMessage(message)) {
 		if (message.payload.event.message_type !== "text") return;
 
@@ -135,23 +86,23 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 		const command = text.substring(0, index > -1 ? index : text.length).toLowerCase();
 
 		var log = false;
-		var logmessage = `Got message\n\tchannel: ${session.login}\n\ttype: ${message.metadata.message_type} (${message.payload.subscription.type})\n\tpayload_event: ${JSON.stringify(message.payload.event)}\n\tchatter: ${message.payload.event.chatter_user_name}\n\ttext: ${text}`;
+		var logmessage = `Got message\n\tchannel: ${connection.authorization.user_login}\n\ttype: ${message.metadata.message_type} (${message.payload.subscription.type})\n\tpayload_event: ${JSON.stringify(message.payload.event)}\n\tchatter: ${message.payload.event.chatter_user_name}\n\ttext: ${text}`;
 
 		if (command === "!ping" || command === "!пинг") {
 			log = true;
-			reply = `🏓 Понг! (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)`;
+			reply = `🏓 Понг! (${getPing(message.metadata.message_timestamp)}ms)`;
 		}
 		else if (command === "!uptime" || command === "!аптайм") {
 			log = true;
-			reply = `⏱️ ${HumanizeDuration(new Date(message.payload.subscription.created_at).getTime() - Date.now())}`;
+			reply = `⏱️ ${HumanizeDuration(Date.now() - new Date(message.payload.subscription.created_at).getTime())}`;
 		}
 		else if (command === "!банворд_добавить") {
 			log = true;
 			if (isModerator(message.payload)) {
 				const term = text.substring(command.length + 1);
 				if (term.length > 1) {
-					const response = await Request.AddBlockedTerm(client_id, session.access_token, {broadcaster_id: session.channel_id, moderator_id: session.channel_id}, {text: term});
-					logmessage += `\n\tresponse_addblockedterm: ${JSON.stringify(response)}`;
+					const response = await Request.AddBlockedTerm(connection.authorization, connection.authorization.user_id, term);
+					logmessage += `\n\taddblockedterm: ${JSON.stringify(response)}`;
 					reply = response.status === 200 ? `✅ Успешно! (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! (${response.message})`;
 				} else {
 					reply = `❌ Банворд должен быть длиннее 1 символа!`;
@@ -165,16 +116,16 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 			if (isModerator(message.payload)) {
 				const term = text.substring(command.length + 1);
 				if (term.length > 1) {
-					let response = await Request.GetBlockedTerms(client_id, session.access_token, {broadcaster_id: session.channel_id, moderator_id: session.channel_id});
-					logmessage += `\n\tresponse_getblockedterms: ${JSON.stringify(response)}`;
+					let response = await Request.GetBlockedTerms(connection.authorization, connection.authorization.user_id);
+					logmessage += `\n\tgetblockedterms: ${JSON.stringify(response)}`;
 					if (response.status === 200) {
 						let id: string | null = null;
 						for (let entry of response.data) if (entry.text === term) id = entry.id;
 						if (id) {
-							let response = await Request.RemoveBlockedTerm(client_id, session.access_token, {broadcaster_id: session.channel_id, moderator_id: session.channel_id, id});
-							logmessage += `\n\tresponse_removeblockedterm: ${JSON.stringify(response)}`;
+							let response = await Request.RemoveBlockedTerm(connection.authorization, connection.authorization.user_id, id);
+							logmessage += `\n\tremoveblockedterm: ${JSON.stringify(response)}`;
 							if (response.status === 204) {
-								reply = `✅ Успешно! (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)`;
+								reply = `✅ Успешно! (${getPing(message.metadata.message_timestamp)}ms)`;
 							} else
 								reply = `❌ Ошибка! (${response.message})`;
 						} else
@@ -190,7 +141,7 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 		}
 		else if (command === "!банворд_лист") {
 			log = true;
-			reply = isModerator(message.payload) ? `📜 https://dashboard.twitch.tv/u/${session.login}/settings/moderation/blocked-terms` : `❌ Нет полномочий.`;
+			reply = isModerator(message.payload) ? `📜 https://dashboard.twitch.tv/u/${connection.authorization.user_login}/settings/moderation/blocked-terms` : `❌ Нет полномочий.`;
 		}
 		else if (command === "!game" || command === "!игра") {
 			log = true;
@@ -199,8 +150,8 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 				var game_id: string | null = null;
 				if (game === "общение" || game === "just chatting") game_id = "509658";
 				else {
-					const response = await Request.SearchCategories(client_id, session.access_token, {query: game, first: 1});
-					logmessage += `\n\tresponse_searchcategories: ${JSON.stringify(response)}`;
+					const response = await Request.SearchCategories(connection.authorization, game, 1);
+					logmessage += `\n\tsearchcategories: ${JSON.stringify(response)}`;
 					if (response.status === 200) {
 						if (response.data.length > 0) {
 							game = response.data[0].name;
@@ -213,9 +164,9 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 				}
 
 				if (game_id) {
-					const response = await Request.ModifyChannelInformation(client_id, session.access_token, {broadcaster_id: session.channel_id}, {game_id});
-					logmessage += `\n\tresponse_modifychannelinformation: ${JSON.stringify(response)}`;
-					reply = response.status === 204 ? `✅ Игра изменена на ${game} (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! ${response.message}`;
+					const response = await Request.ModifyChannelInformation(connection.authorization, { game_id });
+					logmessage += `\n\tmodifychannelinformation: ${JSON.stringify(response)}`;
+					reply = response.status === 204 ? `✅ Успешно! (${getPing(message.metadata.message_timestamp)}ms)` : `❌ Ошибка! ${response.message}`;
 				}
 			} else {
 				reply = `❌ Нет полномочий.`;
@@ -225,31 +176,24 @@ async function onNotification(session: Session, message: EventSub.Message.Notifi
 			log = true;
 			if (isModerator(message.payload)) {
 				const title = text.substring(command.length + 1);
-				const response = await Request.ModifyChannelInformation(client_id, session.access_token, {broadcaster_id: session.channel_id}, {title});
-				logmessage += `\n\tresponse_modifychannelinformation: ${JSON.stringify(response)}`;
-				reply = response.status === 204 ? `✅ Название изменено на ${title} (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! ${response.message}`;
+				const response = await Request.ModifyChannelInformation(connection.authorization, { title });
+				logmessage += `\n\tmodifychannelinformation: ${JSON.stringify(response)}`;
+				reply = response.status === 204 ? `✅ Успешно! (${getPing(message.metadata.message_timestamp)}ms)` : `❌ Ошибка! ${response.message}`;
 			} else {
 				reply = `❌ Нет полномочий.`;
 			}
 		}
 
-		if (reply) logmessage += `\n\treply_text: ${reply}\n\tresponse_sendchatmessage: ${JSON.stringify(await Request.SendChatMessage(client_id, data.bot_access_token, {broadcaster_id: session.channel_id, sender_id: bot_id, message: reply, reply_parent_message_id: message.payload.event.message_id}))}`;
+		if (reply) logmessage += `\n\treply_text: ${reply}\n\tsendchatmessage: ${JSON.stringify(await Request.SendChatMessage(bot_authorization, connection.authorization.user_id, reply, message.payload.event.message_id))}`;
 		if (log) console.log(`${logmessage}\n`);
 	}
 }
 
-/** Parses `session_reconnect` message: closes WebSocket and uses gotten `reconnect_url` as url to connect WebSocket */
-async function onSessionReconnect(session: Session, message: EventSub.Message.SessionReconnect) {
-	session.reconnect_url = message.payload.session.reconnect_url;
-	session.ws.close(4008, "session_reconnect message");
-}
-
 /** Asks from user in console to authorize their twitch, asks to insert link, and then parses it to return twitch access token data */
-export async function getAccessToken(rl: readline.Interface, scopes: string[], channel_id: string): Promise<ResponseBody.OAuth2Validate> {
-	console.log(`Authorize app: https://id.twitch.tv/oauth2/authorize?response_type=token&client_id=${client_id}&redirect_uri=${redirect_uri}&scope=${scopes.join('%20')}`);
+export async function getAccessToken<S extends Authorization.Scope[]>(rl: readline.Interface, scopes: S): Promise<string> {
+	console.log(`Authorize app: ${Authorization.authorizeURL(client_id, redirect_uri, scopes)}`);
 
-	var link = "";
-	await new Promise<void>(resolve => rl.question(`Insert link here (example: ${redirect_uri}#access_token=dsfalg34jd34gsdk3): `, answer => { link = answer; resolve(); }));
+	var link = await new Promise<string>(resolve => rl.question(`Insert link here (example: ${redirect_uri}#access_token=dsfalg34jd34gsdk3): `, answer => resolve(answer)));
 
 	console.log("");
 
@@ -264,24 +208,8 @@ export async function getAccessToken(rl: readline.Interface, scopes: string[], c
 
 		link = link.substring(index + 1);
 		for (let k_v of link.split("&")) {
-			const [k, access_token] = k_v.split("=", 2);
-			if (k === "access_token") {
-				console.log(`Saving access token...`);
-				const response = await Request.OAuth2Validate(access_token);
-				console.log(`\tvalidate_response: ${JSON.stringify(response)}\n`);
-				if (response.status === 200) {
-					if (response.user_id !== channel_id) {
-						await Request.OAuth2Revoke(client_id, access_token);
-						throw `Access token belongs to other channel!`;
-					}
-					if (response.client_id !== client_id) {
-						await Request.OAuth2Revoke(response.client_id, access_token);
-						throw `Access token belongs to other client_id!`;
-					}
-					return response;
-				} else
-					throw `Request.OAuth2Validate failed!`;
-			}
+			const [k, token] = k_v.split("=", 2);
+			if (k === "access_token") return token;
 		}
 
 		throw "Wrong link";
@@ -292,12 +220,60 @@ export async function getAccessToken(rl: readline.Interface, scopes: string[], c
 }
 
 /** Validates access token of channel, tries to revoke it (if wrong), and returns some entries from access token data */
-async function validateAccessToken(rl: readline.Interface | null, scopes: string[], channel_id: string, login: string, access_token: string) {
-	console.log(`Validating access token for ${login}...`);
-	let response = await Request.OAuth2Validate(access_token);
-	console.log(`\tresponse: ${JSON.stringify(response)}\n`);
+async function getAuthorization<S extends Authorization.Scope[]>(rl: readline.Interface | null, user: User, scopes: S): Promise<{authorization: Authorization.User<S>, rl: readline.Interface | null}> {
+	try {
+		console.log(`Validating access token for ${user.login}...`);
+		const response = await Request.OAuth2Validate(user.token);
+		console.log(`\tresponse: ${JSON.stringify(response)}\n`);
+		if (response.ok) {
+			const authorization = Authorization.fromResponseBodyOAuth2Validate(response);
+			if (authorization.type !== "user") throw `Token isn't user access token!\n`;
 
-	if (response.status === 200 && response.scopes.sort().join('') !== scopes.sort().join('')) {
+			if (!Authorization.hasScopes(authorization, ...scopes)) {
+				console.log("Revoking access token... (has wrong scopes)");
+				const response = await Request.OAuth2Revoke(authorization);
+				console.log(`\tresponse: ${JSON.stringify(response)}\n`);
+				throw "Revoked";
+			}
+
+			user.login = authorization.user_login;
+			saveData();
+
+			return {authorization, rl};
+		}
+		else {
+			console.log(`Access token expired for ${user.login}!\n`);
+			throw "Expired";
+		}
+	} catch(e) {
+		rl ??= readline.createInterface({ input: process.stdin, output: process.stdout });
+
+		const token = await getAccessToken(rl, scopes);
+		console.log(`Saving access token...`);
+		const response = await Request.OAuth2Validate<S>(token);
+		console.log(`\tvalidate: ${JSON.stringify(response)}`);
+		if (response.ok) {
+			const authorization = Authorization.fromResponseBodyOAuth2Validate(response);
+			if (authorization.type !== "user") throw "bro how the fuck r u created app access token with implicit grant flow???";
+
+			if (authorization.user_id !== user.login) {
+				const response = await Request.OAuth2Revoke(authorization);
+				console.log(`\trevoke: ${JSON.stringify(response)}`);
+				throw `Access token belongs to other channel!`;
+			}
+			if (authorization.client_id !== client_id) {
+				const response = await Request.OAuth2Revoke(authorization);
+				console.log(`\trevoke: ${JSON.stringify(response)}`);
+				throw `Access token belongs to other client_id!`;
+			}
+
+			return {authorization, rl};
+		}
+
+		throw `\nRequest.OAuth2Validate failed!\n\tcode: ${response.status}\n\terror: ${response.message}`;
+	}
+
+	/*if (response.status === 200 && response.scopes.sort().join('') !== scopes.sort().join('')) {
 		console.log("Revoking access token... (has wrong scopes)");
 		const response2 = await Request.OAuth2Revoke(client_id, access_token);
 		console.log(`\tresponse: ${JSON.stringify(response2)}\n`);
@@ -305,29 +281,19 @@ async function validateAccessToken(rl: readline.Interface | null, scopes: string
 	}
 
 	if (response.status === 200) {
-		access_token = response.access_token;
-		login = response.login;
+		const result: any = response;
+		result.access_token = access_token;
+		result.rl = rl;
+		return result;
 	} else {
 		console.log(`Access token expired for ${login}!`);
 
 		rl ??= readline.createInterface({input: process.stdin, output: process.stdout});
-		const response = await getAccessToken(rl, scopes, channel_id);
-		access_token = response.access_token;
-		login = response.login;
-	}
-
-	return {access_token, login, rl};
-}
-
-/** Method which runs some methods for each channel */
-async function runFor(channel_id: string, entry: DataChannelsEntry) {
-	if (entry.subscriptions_id.length > 0) {
-		for (let id of entry.subscriptions_id)
-			console.log(`Previous subscription deleted\n\tid: ${id}\n\tresponse: ${JSON.stringify(await Request.DeleteEventSubSubscription(client_id, entry.access_token, {id}))}\n`);
-		entry.subscriptions_id = [];
-	}
-
-	connectWebSocket(channel_id);
+		const result: any = await getAccessToken(rl, scopes, channel_id);
+		result.access_token = access_token;
+		result.rl = rl;
+		return result;
+	}*/
 }
 
 async function main() {
@@ -335,8 +301,7 @@ async function main() {
 	try {
 		if (fs.existsSync('data.json')) {
 			const json = JSON.parse(fs.readFileSync('data.json').toString());
-			data.bot_access_token = json.bot_access_token;
-			data.bot_login = json.bot_login;
+			data.bot = json.bot;
 			for (let [id, entry] of Object.entries(json.channels))
 				(data.channels as any)[id] = entry;
 		}
@@ -348,10 +313,9 @@ async function main() {
 	//#endregion
 	//#region validating access token of bot
 	var rl: readline.Interface | null = null;
-	const response_bot = await validateAccessToken(rl, bot_scopes, bot_id, "bot", data.bot_access_token);
-	data.bot_access_token = response_bot.access_token;
-	data.bot_login = response_bot.login;
-	rl = response_bot.rl;
+	const { authorization, rl: newRL } = await getAuthorization(rl, data.bot, bot_scopes);
+	bot_authorization = authorization;
+	rl = newRL;
 	//#endregion
 	//#region parsing 2 process argument to find command
 	const commandsStr = "Commands:\n - " + [
@@ -379,12 +343,24 @@ async function main() {
 	//#region validating access token of channels and running websockets
 	var connected = false;
 	for (let [channel_id, entry] of Object.entries(data.channels)) {
-		const response = await validateAccessToken(rl, scopes, channel_id, entry.login, entry.access_token);
-		entry.access_token = response.access_token;
-		entry.login = response.login;
-		rl = response.rl;
-		await runFor(channel_id, entry);
+		const { authorization, rl: newRL } = await getAuthorization(rl, entry.user, scopes);
+		rl = newRL;
 		connected = true;
+
+		if (entry.subscriptions_id.length > 0) {
+			for (let id of entry.subscriptions_id)
+				console.log(`Previous subscription deleted\n\tid: ${id}\n\tresponse: ${JSON.stringify(await Request.DeleteEventSubSubscription(bot_authorization, id))}\n`);
+			entry.subscriptions_id = [];
+		}
+
+		const connection = EventSub.startWebSocket(authorization);
+		console.log(`WebSocket opened\n\tchannel: ${connection.authorization.user_login}\n\turl: ${connection.ws.url}\n`);
+		connections[channel_id] = connection;
+		connection.onSessionWelcome = async(message, is_reconnected) => onSessionWelcome(connection, message, is_reconnected);
+		connection.onNotification = async(message) => onNotification(connection, message);
+		connection.onClose = async(code, reason) => {
+			console.log(`WebSocket closed\n\tchannel: ${connection.authorization.user_login}\n\tcode: ${code}\n\treason: ${reason}\n`);
+		};
 	}
 
 	if (!connected)

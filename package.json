@@ -4,6 +4,7 @@
 		"@types/node": "^22.13.11",
 		"terser-webpack-plugin": "^5.3.14",
 		"ts-loader": "^9.5.2",
+		"twitch.ts": "github:TheLeerName/twitch.ts",
 		"typescript": "^5.8.2",
 		"uglify-js": "^3.19.3",
 		"webpack": "^5.98.0",
