@@ -184,24 +184,24 @@ async function onNotification(connection: EventSub.Connection, message: EventSub
 				reply = `❌ Нет полномочий.`;
 			}
 		}
-		else if (command === "!follow") {
+		else if (command === "!follow" || command === "!фоллоу") {
 			log = true;
-			if (text.length > command.length) {
-				const login = text.substring(command.length + 1);
-				const response = await Request.GetUsers(connection.authorization, { login });
-				logmessage += `\n\tgetusers: ${JSON.stringify(response)}`;
-				if (response.ok && response.data.length > 0) {
-					const response1 = await Request.GetChannelFollowers(connection.authorization, connection.authorization.user_id, response.data[0].id);
-					if (response1.ok && response1.data.length > 0) {
-						reply = `💜 ${response.data[0].display_name} отслеживает этот канал уже ${HumanizeDuration(Date.now() - new Date(response1.data[0].followed_at).getTime())}!`;
-					}
-					else {
-						reply = `❌ ${response.data[0].display_name} не отслеживает этот канал.`;
-					}
+
+			const login = text.length > command.length ? text.substring(command.length + 1) : message.payload.event.chatter_user_login;
+			const response = await Request.GetUsers(connection.authorization, { login });
+			logmessage += `\n\tgetusers: ${JSON.stringify(response)}`;
+
+			if (response.ok && response.data.length > 0) {
+				const response1 = await Request.GetChannelFollowers(connection.authorization, connection.authorization.user_id, response.data[0].id);
+				if (response1.ok && response1.data.length > 0) {
+					reply = `💜 ${response.data[0].display_name} отслеживает этот канал уже ${HumanizeDuration(Date.now() - new Date(response1.data[0].followed_at).getTime())}!`;
 				}
 				else {
-					reply = `❌ Пользователя не существует.`;
+					reply = `❌ ${response.data[0].display_name} не отслеживает этот канал.`;
 				}
+			}
+			else {
+				reply = `❌ Пользователя не существует.`;
 			}
 		}
 
