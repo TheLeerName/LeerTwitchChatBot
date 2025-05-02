@@ -95,7 +95,7 @@ async function onSessionWelcome(connection: EventSub.Connection<typeof scopes>, 
 		if (response2.ok) data.channels[connection.authorization.user_id].subscriptions_id.push(response2.data.id);
 
 		const response3 = await Request.GetStreams(bot_authorization, connection.authorization.user_id, undefined, undefined, "live");
-		logmessage += `\n\tgetstreams_start_polling_watchtime: ${JSON.stringify(response2)}`;
+		logmessage += `\n\tgetstreams_start_polling_watchtime: ${JSON.stringify(response3)}`;
 		if (response3.ok && response3.data.length > 0) polling_watchtime_interval[connection.authorization.user_id] = setInterval(() => saveChattersWatchTime(connection), 60_000);
 
 		saveData();
