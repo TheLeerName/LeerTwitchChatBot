@@ -17,6 +17,7 @@ export const bot_scopes = [
 ] as const satisfies Authorization.Scope[];
 export const scopes = [
 	"moderator:manage:blocked_terms",
+	"moderator:manage:banned_users",
 	"channel:manage:broadcast",
 	"moderator:read:followers",
 	"moderator:read:chatters",
@@ -50,6 +51,13 @@ const polling_watchtime_interval: Record<string, NodeJS.Timeout> = {};
 const HumanizeDuration = humanizer({largest: 3, round: true, delimiter: " ", language: "ru"});
 //#endregion
 
+/** The maximum is exclusive and the minimum is inclusive */
+function getRandomInt(min: number, max: number) {
+	const minCeiled = Math.ceil(min);
+	const maxFloored = Math.floor(max);
+	return Math.floor(Math.random() * (maxFloored - minCeiled) + minCeiled);
+}
+
 /** Writes `const data` to `data.json` */
 export function saveData() {
 	fs.writeFileSync('data.json', JSON.stringify(data, null, '\t'));
@@ -64,9 +72,9 @@ function isModerator(payload: EventSub.Payload.ChannelChatMessage): boolean {
 async function saveChattersWatchTime(connection: EventSub.Connection<typeof scopes>) {
 	const response = await Request.GetChatters(connection.authorization, connection.authorization.user_id);
 	if (response.ok) {
+		const chatters_watchtime = data.channels[connection.authorization.user_id].chatters_watchtime;
 		for (const entry of response.data) {
-			const chatters_watchtime = data.channels[connection.authorization.user_id].chatters_watchtime;
-			if (!chatters_watchtime[entry.user_id]) chatters_watchtime[entry.user_id] = 0;
+			if (chatters_watchtime[entry.user_id] == null) chatters_watchtime[entry.user_id] = 0;
 			else chatters_watchtime[entry.user_id]++;
 		}
 		saveData();
@@ -96,7 +104,10 @@ async function onSessionWelcome(connection: EventSub.Connection<typeof scopes>, 
 
 		const response3 = await Request.GetStreams(bot_authorization, connection.authorization.user_id, undefined, undefined, "live");
 		logmessage += `\n\tgetstreams_start_polling_watchtime: ${JSON.stringify(response3)}`;
-		if (response3.ok && response3.data.length > 0) polling_watchtime_interval[connection.authorization.user_id] = setInterval(() => saveChattersWatchTime(connection), 60_000);
+		if (response3.ok && response3.data.length > 0) {
+			saveChattersWatchTime(connection);
+			polling_watchtime_interval[connection.authorization.user_id] = setInterval(() => saveChattersWatchTime(connection), 60_000);
+		}
 
 		saveData();
 	}
@@ -127,6 +138,28 @@ async function onNotification(connection: EventSub.Connection<typeof scopes>, me
 		else if (command === "!uptime" || command === "!аптайм") {
 			log = true;
 			reply = `⏱️ ${HumanizeDuration(Date.now() - new Date(message.payload.subscription.created_at).getTime())}`;
+		}
+		else if (command === "!sex") {
+			log = true;
+			reply = `❌ Возраст не подтверждён! Посмотрите туториал по подтверждению возраста: https://www.youtube.com/watch?v=j-iheFkstFQ`;
+		}
+		else if (command === "!запуститьядерку") {
+			log = true;
+			if (text.length > command.length)
+				reply = `☢️ Ядерка запущена на ${text.substring(command.length + 1)}! Время прилёта: ${HumanizeDuration(getRandomInt(10, 600) * 1000)}`;
+			else
+				reply = `❌ Нет цели.`;
+		}
+		else if (command === "!русскаярулетка") {
+			log = true;
+			if (getRandomInt(0, 6) === 0) {
+				const mute = getRandomInt(30, 300);
+				reply = `🐴🔫 Вы стреляете в себя... И получаете мут на ${HumanizeDuration(mute * 1000)}!`;
+				setTimeout(async() => {
+					logmessage += `\n\tbanuser: ${JSON.stringify(await Request.BanUser(connection.authorization, connection.authorization.user_id, message.payload.event.chatter_user_id, mute, "Попадание русской рулеткой"))}`;
+				}, 500);
+			} else
+				reply = `🐴🔫 Вы стреляете в себя... И не попадаете!`;
 		}
 		else if (command === "!банворд_добавить") {
 			log = true;
@@ -244,7 +277,7 @@ async function onNotification(connection: EventSub.Connection<typeof scopes>, me
 
 			if (response.ok && response.data.length > 0) {
 				const watchtime = data.channels[connection.authorization.user_id].chatters_watchtime[response.data[0].id];
-				reply = watchtime ? `👀 Время просмотра ${response.data[0].display_name} составляет ${HumanizeDuration(Date.now() - watchtime * 60000)}!` : `❌ ${response.data[0].display_name} не смотрит этот канал.`;
+				reply = watchtime != null ? `👀 Время просмотра ${response.data[0].display_name} составляет ${HumanizeDuration(watchtime * 60000)}!` : `❌ ${response.data[0].display_name} не смотрит этот канал.`;
 			}
 			else {
 				reply = `❌ Пользователя не существует.`;
