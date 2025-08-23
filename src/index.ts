@@ -1,484 +1,158 @@
 //#region imports
-import readline from 'readline';
-import fs, { read } from 'fs';
-import { Request, EventSub, Authorization } from 'twitch.ts';
-import { main as ChannelList } from './channellist';
-import { main as ChannelAdd } from './channeladd';
-import { main as ChannelRemove } from './channelremove';
-import { humanizer } from 'humanize-duration';
+import TerminalCommandsInit from "./terminal-commands";
+import onChannelChatMessage from "./commands";
+import DataInit, { data } from "./data";
+import TwitchAuthorizationInit, { authorization, authorization_bot, runRequestWithTokenRefreshing, scopes_bot, refreshTokenOfBot, refreshTokenOfChannel } from "./twitch-authorization";
+import { Request, EventSub, ResponseBody, Authorization } from "twitch.ts";
 //#endregion
 
-//#region set some consts here
-export const client_id = "0ho17t37uu3a4sfdrs6r76qwi51evf";
-export const bot_id = "238330860";
-export const bot_scopes = [
-	"user:read:chat",
-	"user:write:chat"
-] as const satisfies Authorization.Scope[];
-export const scopes = [
-	"moderator:manage:blocked_terms",
-	"moderator:manage:banned_users",
-	"channel:manage:broadcast",
-	"moderator:read:followers",
-	"moderator:read:chatters",
-] as const satisfies Authorization.Scope[];
-//#endregion
-
-//#region interfaces
-interface User {
-	token: string;
-	login: string;
-}
-export interface DataChannelsEntry {
-	user: User;
-	subscriptions_id: string[];
-	// <user_id>: <minutes>
-	chatters_watchtime: Record<string, number>;
-}
-interface Data {
-	bot: User;
-	channels: Record<string, DataChannelsEntry>;
-}
-//#endregion
-
-//#region some consts which usually you dont need to edit
-export const data: Data = { bot: { token: "", login: "" }, channels: {} };
-export var bot_authorization: Authorization.User<typeof bot_scopes>;
-const WebSocketSSLURL = "wss://eventsub.wss.twitch.tv/ws";
-const redirect_uri = "http://localhost";
-const connections: Record<string, EventSub.Connection> = {};
-const polling_watchtime_interval: Record<string, NodeJS.Timeout> = {};
-const HumanizeDuration = humanizer({largest: 3, round: true, delimiter: " ", language: "ru"});
-//#endregion
-
-/** The maximum is exclusive and the minimum is inclusive */
-function getRandomInt(min: number, max: number) {
-	const minCeiled = Math.ceil(min);
-	const maxFloored = Math.floor(max);
-	return Math.floor(Math.random() * (maxFloored - minCeiled) + minCeiled);
-}
-
-/** Writes `const data` to `data.json` */
-export function saveData() {
-	fs.writeFileSync('data.json', JSON.stringify(data, null, '\t'));
-}
-
-/** @returns Chatter is moderator/broadcaster */
-function isModerator(payload: EventSub.Payload.ChannelChatMessage): boolean {
-	for (let badge of payload.event.badges) if (badge.set_id === "moderator" || badge.set_id === "broadcaster") return true;
-	return false;
-}
-
-async function saveChattersWatchTime(connection: EventSub.Connection<typeof scopes>) {
-	const response = await Request.GetChatters(connection.authorization, connection.authorization.user_id);
-	if (response.ok) {
-		const chatters_watchtime = data.channels[connection.authorization.user_id].chatters_watchtime;
-		for (const entry of response.data) {
-			if (chatters_watchtime[entry.user_id] == null) chatters_watchtime[entry.user_id] = 0;
-			else chatters_watchtime[entry.user_id]++;
-		}
-		saveData();
-	} else {
-		console.error(`Request.GetChatters failed!\n\tcode: ${response.status}\n\terror: ${response.message}`);
-	}
-}
-
-/** Parses `session_welcome` message: sets gotten payload session to `session.eventsub` */
-async function onSessionWelcome(connection: EventSub.Connection<typeof scopes>, message: EventSub.Message.SessionWelcome, is_reconnected: boolean) {
-	var logmessage = `Got message\n\tchannel: ${connection.authorization.user_login}\n\ttype: ${message.metadata.message_type}\n\tpayload_session: ${JSON.stringify(message.payload.session)}`;
-
-	if (!is_reconnected) {
-		const response = await Request.CreateEventSubSubscription(bot_authorization, EventSub.Subscription.ChannelChatMessage({ transport: connection.transport, user_id: bot_authorization.user_id }, connection.authorization.user_id));
-		logmessage += `\n\tsubscription: ${JSON.stringify(response)}`;
-		if (response.ok) {
-			data.channels[connection.authorization.user_id].subscriptions_id.push(response.data.id);
-		}
-
-		const response1 = await Request.CreateEventSubSubscription(bot_authorization, EventSub.Subscription.StreamOnline({ transport: connection.transport }, connection.authorization.user_id));
-		logmessage += `\n\tsubscription: ${JSON.stringify(response1)}`;
-		if (response1.ok) data.channels[connection.authorization.user_id].subscriptions_id.push(response1.data.id);
-
-		const response2 = await Request.CreateEventSubSubscription(bot_authorization, EventSub.Subscription.StreamOffline({ transport: connection.transport }, connection.authorization.user_id));
-		logmessage += `\n\tsubscription: ${JSON.stringify(response2)}`;
-		if (response2.ok) data.channels[connection.authorization.user_id].subscriptions_id.push(response2.data.id);
-
-		const response3 = await Request.GetStreams(bot_authorization, connection.authorization.user_id, undefined, undefined, "live");
-		logmessage += `\n\tgetstreams_start_polling_watchtime: ${JSON.stringify(response3)}`;
-		if (response3.ok && response3.data.length > 0) {
-			saveChattersWatchTime(connection);
-			polling_watchtime_interval[connection.authorization.user_id] = setInterval(() => saveChattersWatchTime(connection), 60_000);
-		}
-
-		saveData();
-	}
-	console.log(`${logmessage}\n`);
-}
-
-function getPing(message_timestamp: string) {
-	return Date.now() - new Date(message_timestamp).getTime();
-}
-
-/** Parses `notification` message of `channel.chat.message` event: handles commands (if any) */
-async function onNotification(connection: EventSub.Connection<typeof scopes>, message: EventSub.Message.Notification) {
-	if (EventSub.Message.Notification.isChannelChatMessage(message)) {
-		if (message.payload.event.message_type !== "text") return;
-
-		const text = message.payload.event.message.text.trim();
-		let index = text.indexOf(" ");
-		let reply: string | null = null;
-		const command = text.substring(0, index > -1 ? index : text.length).toLowerCase();
-
-		var log = false;
-		var logmessage = `Got message\n\tchannel: ${connection.authorization.user_login}\n\ttype: ${message.metadata.message_type} (${message.payload.subscription.type})\n\tpayload_event: ${JSON.stringify(message.payload.event)}\n\tchatter: ${message.payload.event.chatter_user_name}\n\ttext: ${text}`;
-
-		if (command === "!ping" || command === "!пинг") {
-			log = true;
-			reply = `🏓 Понг! (${getPing(message.metadata.message_timestamp)}ms)`;
-		}
-		else if (command === "!uptime" || command === "!аптайм") {
-			log = true;
-			reply = `⏱️ ${HumanizeDuration(Date.now() - new Date(message.payload.subscription.created_at).getTime())}`;
-		}
-		else if (command === "!sex") {
-			log = true;
-			reply = `❌ Возраст не подтверждён! Посмотрите туториал по подтверждению возраста: https://www.youtube.com/watch?v=j-iheFkstFQ`;
-		}
-		else if (command === "!запуститьядерку") {
-			log = true;
-			if (text.length > command.length)
-				reply = `☢️ Ядерка запущена на ${text.substring(command.length + 1)}! Время прилёта: ${HumanizeDuration(getRandomInt(10, 600) * 1000)}`;
-			else
-				reply = `❌ Нет цели.`;
-		}
-		else if (command === "!русскаярулетка") {
-			log = true;
-			if (getRandomInt(0, 6) === 0) {
-				const mute = getRandomInt(30, 300);
-				reply = `🐴🔫 Вы стреляете в себя... И получаете мут на ${HumanizeDuration(mute * 1000)}!`;
-				setTimeout(async() => {
-					logmessage += `\n\tbanuser: ${JSON.stringify(await Request.BanUser(connection.authorization, connection.authorization.user_id, message.payload.event.chatter_user_id, mute, "Попадание русской рулеткой"))}`;
-				}, 500);
-			} else
-				reply = `🐴🔫 Вы стреляете в себя... И не попадаете!`;
-		}
-		else if (command === "!банворд_добавить") {
-			log = true;
-			if (isModerator(message.payload)) {
-				const term = text.substring(command.length + 1);
-				if (term.length > 1) {
-					const response = await Request.AddBlockedTerm(connection.authorization, connection.authorization.user_id, term);
-					logmessage += `\n\taddblockedterm: ${JSON.stringify(response)}`;
-					reply = response.status === 200 ? `✅ Успешно! (${new Date(message.metadata.message_timestamp).getTime() - Date.now()}ms)` : `❌ Ошибка! (${response.message})`;
-				} else {
-					reply = `❌ Банворд должен быть длиннее 1 символа!`;
-				}
-			} else {
-				reply = `❌ Нет полномочий.`;
-			}
-		}
-		else if (command === "!банворд_удалить") {
-			log = true;
-			if (isModerator(message.payload)) {
-				const term = text.substring(command.length + 1);
-				if (term.length > 1) {
-					let response = await Request.GetBlockedTerms(connection.authorization, connection.authorization.user_id);
-					logmessage += `\n\tgetblockedterms: ${JSON.stringify(response)}`;
-					if (response.status === 200) {
-						let id: string | null = null;
-						for (let entry of response.data) if (entry.text === term) id = entry.id;
-						if (id) {
-							let response = await Request.RemoveBlockedTerm(connection.authorization, connection.authorization.user_id, id);
-							logmessage += `\n\tremoveblockedterm: ${JSON.stringify(response)}`;
-							if (response.status === 204) {
-								reply = `✅ Успешно! (${getPing(message.metadata.message_timestamp)}ms)`;
-							} else
-								reply = `❌ Ошибка! (${response.message})`;
-						} else
-							reply = `❌ Банворд не найден!`;
-					} else
-						reply = `❌ Ошибка! (${response.message})`;
-				} else {
-					reply = `❌ Банворд должен быть длиннее 1 символа!`;
-				}
-			} else {
-				reply = `❌ Нет полномочий.`;
-			}
-		}
-		else if (command === "!банворд_лист") {
-			log = true;
-			reply = isModerator(message.payload) ? `📜 https://dashboard.twitch.tv/u/${connection.authorization.user_login}/settings/moderation/blocked-terms` : `❌ Нет полномочий.`;
-		}
-		else if (command === "!game" || command === "!игра") {
-			log = true;
-			if (isModerator(message.payload)) {
-				var game = text.substring(command.length + 1).toLowerCase();
-				var game_id: string | null = null;
-				if (game === "общение" || game === "just chatting") game_id = "509658";
-				else {
-					const response = await Request.SearchCategories(connection.authorization, game, 1);
-					logmessage += `\n\tsearchcategories: ${JSON.stringify(response)}`;
-					if (response.status === 200) {
-						if (response.data.length > 0) {
-							game = response.data[0].name;
-							game_id = response.data[0].id;
-						} else
-							reply = `❌ Игра не найдена!`;
-					}
-					else
-						reply = `❌ Ошибка! ${response.message}`;
-				}
-
-				if (game_id) {
-					const response = await Request.ModifyChannelInformation(connection.authorization, { game_id });
-					logmessage += `\n\tmodifychannelinformation: ${JSON.stringify(response)}`;
-					reply = response.status === 204 ? `✅ Успешно! (${getPing(message.metadata.message_timestamp)}ms)` : `❌ Ошибка! ${response.message}`;
-				}
-			} else {
-				reply = `❌ Нет полномочий.`;
-			}
-		}
-		else if (command === "!title" || command === "!название") {
-			log = true;
-			if (isModerator(message.payload)) {
-				const title = text.substring(command.length + 1);
-				const response = await Request.ModifyChannelInformation(connection.authorization, { title });
-				logmessage += `\n\tmodifychannelinformation: ${JSON.stringify(response)}`;
-				reply = response.status === 204 ? `✅ Успешно! (${getPing(message.metadata.message_timestamp)}ms)` : `❌ Ошибка! ${response.message}`;
-			} else {
-				reply = `❌ Нет полномочий.`;
-			}
-		}
-		else if (command === "!follow" || command === "!фоллоу") {
-			log = true;
-
-			const login = text.length > command.length ? text.substring(command.length + 1) : message.payload.event.chatter_user_login;
-			const response = await Request.GetUsers(connection.authorization, { login });
-			logmessage += `\n\tgetusers: ${JSON.stringify(response)}`;
-
-			if (response.ok && response.data.length > 0) {
-				const response1 = await Request.GetChannelFollowers(connection.authorization, connection.authorization.user_id, response.data[0].id);
-				if (response1.ok && response1.data.length > 0) {
-					reply = `💜 ${response.data[0].display_name} отслеживает этот канал уже ${HumanizeDuration(Date.now() - new Date(response1.data[0].followed_at).getTime())}!`;
-				}
-				else {
-					reply = `❌ ${response.data[0].display_name} не отслеживает этот канал.`;
-				}
-			}
-			else {
-				reply = `❌ Пользователя не существует.`;
-			}
-		}
-		else if (command === "!watchtime" || command === "!времяпросмотра") {
-			log = true;
-
-			const login = text.length > command.length ? text.substring(command.length + 1) : message.payload.event.chatter_user_login;
-			const response = await Request.GetUsers(connection.authorization, { login });
-			logmessage += `\n\tgetusers: ${JSON.stringify(response)}`;
-
-			if (response.ok && response.data.length > 0) {
-				const watchtime = data.channels[connection.authorization.user_id].chatters_watchtime[response.data[0].id];
-				reply = watchtime != null ? `👀 Время просмотра ${response.data[0].display_name} составляет ${HumanizeDuration(watchtime * 60000)}!` : `❌ ${response.data[0].display_name} не смотрит этот канал.`;
-			}
-			else {
-				reply = `❌ Пользователя не существует.`;
-			}
-		}
-
-		if (reply) logmessage += `\n\treply_text: ${reply}\n\tsendchatmessage: ${JSON.stringify(await Request.SendChatMessage(bot_authorization, connection.authorization.user_id, reply, message.payload.event.message_id))}`;
-		if (log) console.log(`${logmessage}\n`);
-	}
-	else if (EventSub.Message.Notification.isStreamOnline(message)) {
-		if (polling_watchtime_interval[connection.authorization.user_id]) clearInterval(polling_watchtime_interval[connection.authorization.user_id]);
-		polling_watchtime_interval[connection.authorization.user_id] = setInterval(() => saveChattersWatchTime(connection), 60_000);
-	}
-	else if (EventSub.Message.Notification.isStreamOffline(message) && polling_watchtime_interval[connection.authorization.user_id]) {
-		clearInterval(polling_watchtime_interval[connection.authorization.user_id]);
-		delete polling_watchtime_interval[connection.authorization.user_id];
-	}
-}
-
-/** Asks from user in console to authorize their twitch, asks to insert link, and then parses it to return twitch access token data */
-export async function getAccessToken<S extends Authorization.Scope[]>(rl: readline.Interface, scopes: S): Promise<string> {
-	console.log(`Authorize app: ${Authorization.authorizeURL(client_id, redirect_uri, scopes)}`);
-
-	var link = await new Promise<string>(resolve => rl.question(`Insert link here (example: ${redirect_uri}#access_token=dsfalg34jd34gsdk3): `, answer => resolve(answer)));
-
-	console.log("");
-
-	try {
-		if (!link.startsWith(redirect_uri)) throw "Wrong link";
-
-		link = link.substring(redirect_uri.length);
-
-		if (link.includes("?")) throw "Do not cancel the authorization!";
-		let index = link.indexOf("#");
-		if (index < 0) throw "Wrong link";
-
-		link = link.substring(index + 1);
-		for (let k_v of link.split("&")) {
-			const [k, token] = k_v.split("=", 2);
-			if (k === "access_token") return token;
-		}
-
-		throw "Wrong link";
-	} catch(e) {
-		console.error(e);
-		process.exit(1);
-	}
-}
-
-/** Validates access token of channel, tries to revoke it (if wrong), and returns some entries from access token data */
-async function getAuthorization<S extends Authorization.Scope[]>(rl: readline.Interface | null, user: User, scopes: S): Promise<{authorization: Authorization.User<S>, rl: readline.Interface | null}> {
-	try {
-		console.log(`Validating access token for ${user.login}...`);
-		const response = await Request.OAuth2Validate(user.token);
-		console.log(`\tresponse: ${JSON.stringify(response)}\n`);
-		if (response.ok) {
-			const authorization = Authorization.fromResponseBodyOAuth2Validate(response);
-			if (authorization.type !== "user") throw `Token isn't user access token!\n`;
-
-			if (!Authorization.hasScopes(authorization, ...scopes)) {
-				console.log("Revoking access token... (has wrong scopes)");
-				const response = await Request.OAuth2Revoke(authorization);
-				console.log(`\tresponse: ${JSON.stringify(response)}\n`);
-				throw "Revoked";
-			}
-
-			user.login = authorization.user_login;
-			saveData();
-
-			return {authorization, rl};
-		}
-		else {
-			console.log(`Access token expired for ${user.login}!\n`);
-			throw "Expired";
-		}
-	} catch(e) {
-		rl ??= readline.createInterface({ input: process.stdin, output: process.stdout });
-
-		const token = await getAccessToken(rl, scopes);
-		console.log(`Saving access token...`);
-		const response = await Request.OAuth2Validate<S>(token);
-		console.log(`\tvalidate: ${JSON.stringify(response)}`);
-		if (response.ok) {
-			const authorization = Authorization.fromResponseBodyOAuth2Validate(response);
-			if (authorization.type !== "user") throw "bro how the fuck r u created app access token with implicit grant flow???";
-
-			if (authorization.user_login !== user.login) {
-				const response = await Request.OAuth2Revoke(authorization);
-				console.log(`\trevoke: ${JSON.stringify(response)}`);
-				throw `Access token belongs to other channel!`;
-			}
-			if (authorization.client_id !== client_id) {
-				const response = await Request.OAuth2Revoke(authorization);
-				console.log(`\trevoke: ${JSON.stringify(response)}`);
-				throw `Access token belongs to other client_id!`;
-			}
-
-			user.token = token;
-			user.login = authorization.user_login;
-
-			return {authorization, rl};
-		}
-
-		throw `\nRequest.OAuth2Validate failed!\n\tcode: ${response.status}\n\terror: ${response.message}`;
-	}
-
-	/*if (response.status === 200 && response.scopes.sort().join('') !== scopes.sort().join('')) {
-		console.log("Revoking access token... (has wrong scopes)");
-		const response2 = await Request.OAuth2Revoke(client_id, access_token);
-		console.log(`\tresponse: ${JSON.stringify(response2)}\n`);
-		response = {status: 401, message: "invalid token"} as ResponseBodyError.OAuth2Validate;
-	}
-
-	if (response.status === 200) {
-		const result: any = response;
-		result.access_token = access_token;
-		result.rl = rl;
-		return result;
-	} else {
-		console.log(`Access token expired for ${login}!`);
-
-		rl ??= readline.createInterface({input: process.stdin, output: process.stdout});
-		const result: any = await getAccessToken(rl, scopes, channel_id);
-		result.access_token = access_token;
-		result.rl = rl;
-		return result;
-	}*/
-}
-
+const polling_channels_id: string[] = [];
+var connection: EventSub.Connection<typeof scopes_bot>;
 async function main() {
-	//#region parsing data.json and setting fields to data
-	try {
-		if (fs.existsSync('data.json')) {
-			const json = JSON.parse(fs.readFileSync('data.json').toString());
-			data.bot = json.bot;
-			for (let [id, entry] of Object.entries(json.channels))
-				(data.channels as any)[id] = entry;
-		}
-	}
-	catch(e) {
-		console.error(`Parsing data.json failed!\n\t${e}`);
+	console.log(`Data initialized (${(await callWithElapsedTime(async() => await DataInit())).elapsed}ms)\n`);
+	await TerminalCommandsInit();
+	console.log(`Twitch authorization initialized (${(await callWithElapsedTime(async() => await TwitchAuthorizationInit())).elapsed}ms)\n`);
+
+	connection = EventSub.startWebSocket(authorization_bot);
+	connection.onSessionWelcome = async(message, is_reconnected) => {
+		console.log(`EventSub session ${is_reconnected ? "re" : ""}connected\n\turl: ${connection.ws.url}\n`);
+		if (!is_reconnected) await addSubscriptions();
+	};
+	connection.onNotification = async(message) => {
+		if (EventSub.Message.Notification.isChannelChatMessage(message)) onChannelChatMessage(message);
+		else if (EventSub.Message.Notification.isStreamOnline(message)) onStreamOnline(message);
+		else if (EventSub.Message.Notification.isStreamOffline(message)) onStreamOffline(message);
+	};
+	connection.onRevocation = async(message) => {
+		console.error(`EventSub subscription was revocated\n\tevent: ${message.payload.subscription.type} version ${message.payload.subscription.version}\n\tcondition: ${JSON.stringify(message.payload.subscription.condition)}\n\treason: ${message.payload.subscription.status}\n`);
 		process.exit(1);
-	}
-	//#endregion
-	//#region validating access token of bot
-	var rl: readline.Interface | null = null;
-	const { authorization, rl: newRL } = await getAuthorization(rl, data.bot, bot_scopes);
-	bot_authorization = authorization;
-	rl = newRL;
-	//#endregion
-	//#region parsing 2 process argument to find command
-	const commandsStr = "Commands:\n - " + [
-		"node index.js list                 - shows added twitch channels to chatbot in CSV format",
-		"node index.js add <user_login>     - adds twitch channel to chatbot",
-		"node index.js add <channel_id>     - adds twitch channel to chatbot",
-		"node index.js remove <user_login>  - removes twitch channel to chatbot",
-		"node index.js remove <channel_id>  - removes twitch channel to chatbot",
-		"node index.js                      - starts the bot"
-	].join('\n - ');
-	const commandName = process.argv[2];
-	if (commandName) {
-		if (commandName === "list") ChannelList();
-		else if (commandName === "add") ChannelAdd();
-		else if (commandName === "remove") ChannelRemove();
-		else if (commandName === "help") console.log(commandsStr);
-		else {
-			console.error(`Unknown command!\n\n${commandsStr}`);
-			process.exit(1);
-		}
-		if (rl) rl.close();
-		return;
-	}
-	//#endregion
-	//#region validating access token of channels and running websockets
-	var connected = false;
-	for (let [channel_id, entry] of Object.entries(data.channels)) {
-		const { authorization, rl: newRL } = await getAuthorization(rl, entry.user, scopes);
-		rl = newRL;
-		connected = true;
+	};
+	connection.onClose = async(code, reason) => {
+		console.error(`EventSub session disconnected\n\tcode: ${code} - ${reason}\n`);
+	};
 
-		if (entry.subscriptions_id.length > 0) {
-			for (let id of entry.subscriptions_id)
-				console.log(`Previous subscription deleted\n\tid: ${id}\n\tresponse: ${JSON.stringify(await Request.DeleteEventSubSubscription(bot_authorization, id))}\n`);
-			entry.subscriptions_id = [];
-		}
-
-		const connection = EventSub.startWebSocket(authorization);
-		console.log(`WebSocket opened\n\tchannel: ${connection.authorization.user_login}\n\turl: ${connection.ws.url}\n`);
-		connections[channel_id] = connection;
-		connection.onSessionWelcome = async(message, is_reconnected) => onSessionWelcome(connection, message, is_reconnected);
-		connection.onNotification = async(message) => onNotification(connection, message);
-		connection.onClose = async(code, reason) => {
-			console.log(`WebSocket closed\n\tchannel: ${connection.authorization.user_login}\n\tcode: ${code}\n\treason: ${reason}\n`);
-		};
-	}
-
-	if (!connected)
-		console.error(`No channels to connect!`);
-	//#endregion
-
-	if (rl) rl.close();
-	saveData();
+	checkIfStreamersIsLive();
 }
+
+async function checkIfStreamersIsLive() {
+	const enabled_channels = Object.entries(data.channels).filter(([_, channel]) => channel.enabled);
+	const getstreams = await getStreams(async() => await refreshTokenOfBot(), authorization_bot, enabled_channels.map(([id, _]) => id), undefined, undefined, "live");
+	if (!getstreams.ok)
+		return console.error(`Checking if streamers is live failed!\n\tcode: ${getstreams.status} - ${getstreams.message}\n`);
+
+	for (const entry of getstreams.data)
+		polling_channels_id.push(entry.user_id);
+	getChattersPolling();
+}
+
+async function onStreamOnline(message: EventSub.Message.Notification<EventSub.Payload.StreamOnline>) {
+	console.log(`Stream started\n\tchannel: ${message.payload.event.broadcaster_user_login}\n`);
+	const id = message.payload.event.broadcaster_user_id;
+	if (!polling_channels_id.includes(id))
+		polling_channels_id.push(id);
+}
+async function onStreamOffline(message: EventSub.Message.Notification<EventSub.Payload.StreamOffline>) {
+	console.log(`Stream ended\n\tchannel: ${message.payload.event.broadcaster_user_login}\n`);
+	const id = message.payload.event.broadcaster_user_id;
+	const index = polling_channels_id.indexOf(id);
+	if (index > -1) polling_channels_id.splice(index, 1);
+}
+
+async function getChattersPolling() {
+	if (polling_channels_id.length > 0) {
+		for (const id of polling_channels_id) {
+			const a = authorization[id];
+			const channel = data.channels[id];
+			const response = await getChatters(async() => await refreshTokenOfChannel(id), a, a.user_id);
+			if (response.ok) {
+				if (response.data.length > 0) {
+					for (const entry of response.data) {
+						if (channel.chatters_watchtime[entry.user_id] == null) channel.chatters_watchtime[entry.user_id] = 0;
+						else channel.chatters_watchtime[entry.user_id]++;
+					}
+					data.save();
+				}
+			}
+			else
+				console.error(`Getting chatters failed!\n\tchannel: ${channel.user.login}\n\tcode: ${response.status} - ${response.message}\n`);
+		}
+	}
+
+	setTimeout(getChattersPolling, 60_000); // each minute
+}
+
+async function getStreams(refresh: () => Promise<void>, ...args: Parameters<typeof Request.GetStreams>) {
+	const res_data: ResponseBody.GetStreams["data"] = [];
+	var cursor: string | undefined;
+	async function func() {
+		const response = await runRequestWithTokenRefreshing(refresh, Request.GetStreams, args[0], args[1], args[2], args[3], args[4], args[5], undefined, undefined, cursor);
+		if (response.ok) {
+			res_data.push(...response.data);
+			cursor = response.pagination?.cursor;
+			if (cursor) return await func();
+			return response;
+		}
+		else
+			return response;
+	}
+	const r = await func();
+	if (r.ok) {
+		r.data = res_data;
+		return r;
+	}
+	else
+		return r;
+}
+async function getChatters(refresh: () => Promise<void>, ...args: Parameters<typeof Request.GetChatters>) {
+	const res_data: ResponseBody.GetChatters["data"] = [];
+	var cursor: string | undefined;
+	async function func() {
+		const response = await runRequestWithTokenRefreshing(refresh, Request.GetChatters, args[0], args[1], undefined, cursor);
+		if (response.ok) {
+			res_data.push(...response.data);
+			cursor = response.pagination?.cursor;
+			if (cursor) return await func();
+			return response;
+		}
+		else
+			return response;
+	}
+	const r = await func();
+	if (r.ok) {
+		r.data = res_data;
+		return r;
+	}
+	else
+		return r;
+}
+
+export async function callWithElapsedTime<R extends any>(func: ()=>Promise<R>): Promise<{ response: R, elapsed: number }> {
+	const time = Date.now();
+	const response = await func();
+	return { response, elapsed: Date.now() - time };
+}
+
+async function addSubscriptions() {
+	for (const [channel_id, channel] of Object.entries(data.channels)) {
+		if (!channel.enabled) return;
+		for (const id of channel.subscriptions_id) {
+			const response = await runRequestWithTokenRefreshing(async() => await refreshTokenOfBot(), Request.DeleteEventSubSubscription, authorization[channel_id], id);
+			if (!response.ok) console.error(`Removing previous subscription failed!\n\tid: ${id}\n\tcode: ${response.status} - ${response.message}\n`);
+			channel.subscriptions_id.shift();
+		}
+
+		const a = authorization[channel_id];
+		addSubscription(EventSub.Subscription.ChannelChatMessage(connection, channel_id), a);
+		addSubscription(EventSub.Subscription.StreamOnline(connection, channel_id), a);
+		addSubscription(EventSub.Subscription.StreamOffline(connection, channel_id), a);
+	}
+	data.save();
+}
+
+async function addSubscription(subscription: EventSub.Subscription, authorization: Authorization.User) {
+	const response = await runRequestWithTokenRefreshing(async() => await refreshTokenOfChannel(authorization.user_id), Request.CreateEventSubSubscription, authorization, subscription);
+	if (!response.ok) console.error(`Subscribing to event failed!\n\tevent: ${subscription.type} version ${subscription.version}\n\tchannel: ${authorization.user_login}\n\tcode: ${response.status} - ${response.message}`);
+	else data.channels[authorization.user_id].subscriptions_id.push(response.data.id);
+}
+
 main().catch(console.error);
