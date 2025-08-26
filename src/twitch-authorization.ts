@@ -27,7 +27,8 @@ export const redirect_uri = `http://localhost:${port}`;
 export async function refreshTokenOfBot() {
 	const refresh = await Request.OAuth2Token.RefreshToken(data.authorization.client_id, data.authorization.client_secret, data.bot.refresh_token);
 	if (refresh.ok) {
-		data.bot.access_token = authorization_bot.token = refresh.access_token;
+		authorization_bot.token = refresh.access_token;
+		data.bot.access_token = refresh.access_token;
 		data.bot.refresh_token = refresh.refresh_token;
 		data.save();
 	}
@@ -39,7 +40,8 @@ export async function refreshTokenOfChannel(channel_id: string) {
 	const refresh = await Request.OAuth2Token.RefreshToken(data.authorization.client_id, data.authorization.client_secret, channel.user.refresh_token);
 	if (refresh.ok) {
 		const a = authorization[channel_id];
-		channel.user.access_token = a.token = refresh.access_token;
+		a.token = refresh.access_token;
+		channel.user.access_token = refresh.access_token;
 		channel.user.refresh_token = refresh.refresh_token;
 	}
 	else
@@ -49,9 +51,12 @@ export async function runRequestWithTokenRefreshing<R extends ResponseBody<true,
 	return await new Promise(resolve => {
 		async function fun() {
 			const r = await request(...args);
-
-			if (r.status === 401) await refresh();
-			else if (r.status === 408) setTimeout(fun, 1000);
+			if (r.status === 401) {
+				await refresh();
+				setTimeout(fun, 1000);
+			}
+			else if (r.status === 408)
+				setTimeout(fun, 1000);
 			else return resolve(r);
 		}
 		fun();
@@ -86,7 +91,8 @@ export default async() => {
 		authorization_bot.token = validate.token;
 		if (validate.type === "user") {
 			authorization_bot.user_id = validate.user_id;
-			data.bot.login = authorization_bot.user_login = validate.user_login;
+			authorization_bot.user_login = validate.user_login;
+			data.bot.login = validate.user_login;
 			data.save();
 		}
 	}
@@ -107,18 +113,18 @@ export default async() => {
 			user_login: channel.user.login,
 			user_id: ""
 		};
-		const a = authorization[id];
-		const validate = await runRequestWithTokenRefreshing<ResponseBody.OAuth2Validate<Authorization.Scope[]>, [string]>(async() => await refreshTokenOfChannel(id), Request.OAuth2Validate, channel.user.access_token);
+		const validate = await runRequestWithTokenRefreshing<ResponseBody.OAuth2Validate<Authorization.Scope[]>, []>(async() => await refreshTokenOfChannel(id), async() => await Request.OAuth2Validate(channel.user.access_token));
 		if (!validate.ok) {
 			console.error(`Token of channel ${channel.user.login} failed, try to fix this by running command: ${commandToString(AddCommand)}\n\tcode: ${validate.status} - ${validate.message}`);
 			process.exit(1);
 		}
 		if (Authorization.hasScopes(validate, ...scopes)) {
-			a.expires_in = validate.expires_in;
-			a.token = validate.token;
+			authorization[id].expires_in = validate.expires_in;
+			authorization[id].token = validate.token;
 			if (validate.type === "user") {
-				a.user_id = validate.user_id;
-				channel.user.login = a.user_login = validate.user_login;
+				authorization[id].user_id = validate.user_id;
+				authorization[id].user_login = validate.user_login;
+				channel.user.login = validate.user_login;
 				data.save();
 			}
 		}
