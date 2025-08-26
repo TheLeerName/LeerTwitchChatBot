@@ -98,7 +98,7 @@ export default async() => {
 	//#region channel tokens validation
 	for (const [id, channel] of Object.entries(data.channels)) {
 		if (!channel.enabled) continue;
-		const a = authorization[id] = {
+		authorization[id] = {
 			type: "user",
 			token: channel.user.access_token,
 			client_id: data.authorization.client_id,
@@ -107,6 +107,7 @@ export default async() => {
 			user_login: channel.user.login,
 			user_id: ""
 		};
+		const a = authorization[id];
 		const validate = await runRequestWithTokenRefreshing<ResponseBody.OAuth2Validate<Authorization.Scope[]>, [string]>(async() => await refreshTokenOfChannel(id), Request.OAuth2Validate, channel.user.access_token);
 		if (!validate.ok) {
 			console.error(`Token of channel ${channel.user.login} failed, try to fix this by running command: ${commandToString(AddCommand)}\n\tcode: ${validate.status} - ${validate.message}`);
