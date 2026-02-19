@@ -73,7 +73,7 @@ async function onGottenCode(req: IncomingMessage, res: ServerResponse<IncomingMe
 	console.log(`Authorization code: ${code}`);
 	const response = await Request.OAuth2Token.AuthorizationCode(data.authorization.client_id, data.authorization.client_secret, redirect_uri, code);
 	if (response.ok) {
-		const validate = await Request.OAuth2Validate(data.bot.access_token);
+		const validate = await Request.OAuth2Validate(response.access_token);
 		if (!validate.ok || validate.type === "app") throw new Error("Impossible error");
 		const channel = data.channels[validate.user_id];
 		if (channel) {
