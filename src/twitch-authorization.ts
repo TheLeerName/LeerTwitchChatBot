@@ -4,7 +4,7 @@ import { command as InitCommand } from "./terminal-commands/init";
 import { command as SetCommand } from "./terminal-commands/authorize";
 import { command as AddCommand } from "./terminal-commands/add";
 import { commandToString } from "./terminal-commands";
-import { Request, Authorization, ResponseBody, ResponseBodyError } from "twitch.ts";
+import { Request, Authorization, ResponseBody } from "twitch.ts";
 //#endregion
 
 export const scopes_bot = [
@@ -47,7 +47,7 @@ export async function refreshTokenOfChannel(channel_id: string) {
 	else
 		console.error(`Refreshing token of bot failed!\n\tcode: ${refresh.status} - ${refresh.message}`);
 }
-export async function runRequestWithTokenRefreshing<R extends ResponseBody<true, number>, A extends any[]>(refresh: ()=>Promise<void>, request: (...args: A)=>Promise<R | ResponseBodyError>, ...args: A): Promise<R | ResponseBodyError> {
+export async function runRequestWithTokenRefreshing<R extends ResponseBody.Base<true, number>, A extends any[]>(refresh: ()=>Promise<void>, request: (...args: A)=>Promise<R | ResponseBody.Error>, ...args: A): Promise<R | ResponseBody.Error> {
 	return await new Promise(resolve => {
 		async function fun() {
 			const r = await request(...args);
