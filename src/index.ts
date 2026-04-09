@@ -6,7 +6,7 @@ import TwitchAuthorizationInit, { authorization, authorization_bot, runRequestWi
 import { Request, EventSub, ResponseBody, Authorization } from "twitch.ts";
 //#endregion
 
-const polling_channels_id: string[] = [];
+//const polling_channels_id: string[] = [];
 var connection: EventSub.Connection<typeof scopes_bot>;
 async function main() {
 	console.log(`Data initialized (${(await callWithElapsedTime(async() => await DataInit())).elapsed}ms)\n`);
@@ -31,10 +31,10 @@ async function main() {
 		console.error(`EventSub session disconnected\n\tcode: ${code} - ${reason}\n`);
 	};
 
-	checkIfStreamersIsLive();
+	//checkIfStreamersIsLive();
 }
 
-async function checkIfStreamersIsLive() {
+/*async function checkIfStreamersIsLive() {
 	const enabled_channels = Object.entries(data.channels).filter(([_, channel]) => channel.enabled);
 	const getstreams = await getStreams(async() => await refreshTokenOfBot(), authorization_bot, enabled_channels.map(([id, _]) => id), undefined, undefined, "live");
 	if (!getstreams.ok)
@@ -43,22 +43,22 @@ async function checkIfStreamersIsLive() {
 	for (const entry of getstreams.data)
 		polling_channels_id.push(entry.user_id);
 	getChattersPolling();
-}
+}*/
 
 async function onStreamOnline(message: EventSub.Message.Notification<EventSub.Payload.StreamOnline>) {
 	console.log(`Stream started\n\tchannel: ${message.payload.event.broadcaster_user_login}\n`);
 	const id = message.payload.event.broadcaster_user_id;
-	if (!polling_channels_id.includes(id))
-		polling_channels_id.push(id);
+	//if (!polling_channels_id.includes(id))
+	//	polling_channels_id.push(id);
 }
 async function onStreamOffline(message: EventSub.Message.Notification<EventSub.Payload.StreamOffline>) {
 	console.log(`Stream ended\n\tchannel: ${message.payload.event.broadcaster_user_login}\n`);
-	const id = message.payload.event.broadcaster_user_id;
-	const index = polling_channels_id.indexOf(id);
-	if (index > -1) polling_channels_id.splice(index, 1);
+	//const id = message.payload.event.broadcaster_user_id;
+	//const index = polling_channels_id.indexOf(id);
+	//if (index > -1) polling_channels_id.splice(index, 1);
 }
 
-async function getChattersPolling() {
+/*async function getChattersPolling() {
 	if (polling_channels_id.length > 0) {
 		for (const id of polling_channels_id) {
 			const a = authorization[id];
@@ -79,7 +79,7 @@ async function getChattersPolling() {
 	}
 
 	setTimeout(getChattersPolling, 60_000); // each minute
-}
+}*/
 
 async function getStreams(refresh: () => Promise<void>, ...args: Parameters<typeof Request.GetStreams>) {
 	const res_data: ResponseBody.GetStreams["data"] = [];

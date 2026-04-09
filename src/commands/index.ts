@@ -10,7 +10,7 @@ import BlockedTermList from "./blockedtermlist";
 import Game from "./game";
 import Title from "./title";
 import FollowTime from "./followtime";
-import WatchTime from "./watchtime";
+//import WatchTime from "./watchtime";
 import { EventSub, Request } from "twitch.ts";
 //#endregion
 
@@ -34,7 +34,7 @@ const commands: {prefixes: string[], func: (req: Request, res: Response)=>Promis
 	Game,
 	Title,
 	FollowTime,
-	WatchTime
+	//WatchTime
 ];
 
 export default async(message: Request["message"]) => {

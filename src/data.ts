@@ -19,10 +19,10 @@ export namespace AuthorizationData {
 }
 export type ChannelData = ChannelData.V2;
 export namespace ChannelData {
-	export function V1(user = TokenData.V1(), subscriptions_id: string[] = [], chatters_watchtime: Record<string, number> = {}) { return { user, subscriptions_id, chatters_watchtime } }
+	export function V1(user = TokenData.V1(), subscriptions_id: string[] = []/*, chatters_watchtime: Record<string, number> = {}*/) { return { user, subscriptions_id/*, chatters_watchtime*/ } }
 	export type V1 = ReturnType<typeof V1>;
 
-	export function V2(user = TokenData.V2(), subscriptions_id: string[] = [], chatters_watchtime: Record<string, number> = {}) { return { enabled: true, user, subscriptions_id, chatters_watchtime } }
+	export function V2(user = TokenData.V2(), subscriptions_id: string[] = []/*, chatters_watchtime: Record<string, number> = {}*/) { return { enabled: true, user, subscriptions_id/*, chatters_watchtime*/ } }
 	export type V2 = ReturnType<typeof V2>;
 }
 export type TokenData = TokenData.V2;
@@ -64,7 +64,7 @@ export class DataClass implements Data {
 							else console.error(`Revoking access token from data version 1 failed\n\treason: data version upgrading 1 => 2\n\ttoken: ${validate.token}\n\tchannel: ${channel.user.login}\n`);
 						}
 
-						data.channels[channel_id] = ChannelData.V2(TokenData.V2(undefined, undefined, channel.user.login), [], channel.chatters_watchtime);
+						data.channels[channel_id] = ChannelData.V2(TokenData.V2(undefined, undefined, channel.user.login), []/*, channel.chatters_watchtime*/);
 					}
 					(json.version as any) = 2;
 					this.save();

@@ -12,8 +12,6 @@ A simple chat bot for twitch, mostly showcase of my typescript module twitch.ts
 - `!title <title>` - changes title of stream, works only if you are moderator!
 - `!followtime` - shows your follow time
 - `!followtime <username>` - shows follow time of user you specified
-- `!watchtime` - shows your total watch time of streams in minutes
-- `!watchtime <username>` - shows total watch time of streams of user you specified in minutes
 ## BUILDING
 1. `npm i`
 2. `npm run build`

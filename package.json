@@ -1,7 +1,7 @@
 {
 	"devDependencies": {
 		"@types/humanize-duration": "^3.27.4",
-		"@types/node": "^22.13.11",
+		"@types/node": "^22.19.17",
 		"terser-webpack-plugin": "^5.3.14",
 		"ts-loader": "^9.5.2",
 		"twitch.ts": "github:TheLeerName/twitch.ts#v1.5.5",
