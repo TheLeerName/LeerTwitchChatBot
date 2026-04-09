@@ -1,6 +1,6 @@
 {
 	"compilerOptions": {
-		"target": "es2016",
+		"target": "es2024",
 		"module": "node16",
 		"outDir": "./",
 		"rootDir": "./src",
@@ -10,6 +10,7 @@
 		"typeRoots": [
 			"node_modules/@types"
 		],
+		"types": ["node"],
 		"forceConsistentCasingInFileNames": true,
 		"useUnknownInCatchVariables": false,
 		"experimentalDecorators": true,
