@@ -15,6 +15,11 @@ export default {
 
 		const a = authorization[req.message.payload.event.broadcaster_user_id];
 		const query = req.args.join(" ").toLowerCase();
+		if (query.length == 0 || query == "0") {
+			const response = await Twitch.Request.ModifyChannelInformation(a, { game_id: "" });
+			res.log += `\tmodifychannelinformation: ${JSON.stringify(response)}\n`;
+			return res.twitch = response.ok ? `✅ Игра изменена на Нет категории!` : `❌ Ошибка! (${response.status} - ${response.message})`;
+		}
 
 		const searchcategories = await Twitch.Request.SearchCategories(a, query, 1);
 		res.log += `\tsearchcategories: ${JSON.stringify(searchcategories)}\n`;

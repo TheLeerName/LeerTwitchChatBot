@@ -8,7 +8,7 @@ A simple chat bot for twitch, mostly showcase of my typescript module twitch.ts
 - `!blockedtermadd <term>` - makes term be blocked by twitch automod, works only if you are moderator!
 - `!blockedtermremove <term>` - removes term from blocked by twitch automod, works only if you are moderator!
 - `!blockedtermlist` - sends the link for showing blocked terms of channel, works only if you are moderator!
-- `!game <game_id_or_name>` - changes game on stream, works only if you are moderator!
+- `!game <game_name>` - changes game on stream, works only if you are moderator! (to unset game just do not pass the argument or type 0 in it)
 - `!title <title>` - changes title of stream, works only if you are moderator!
 - `!followtime` - shows your follow time
 - `!followtime <username>` - shows follow time of user you specified
@@ -27,3 +27,5 @@ A simple chat bot for twitch, mostly showcase of my typescript module twitch.ts
 - `moderator:read:chatters` - used for `!watchtime` command system (polling Request.GetChatters)
 ## TODO
 - add translations, cuz bot answers on russian language
+- command `!uid` - sends uid of streamer gacha account (genshin, hsr) of current category, `!setuid <uid>` - sets uid to current category
+- command `!rank` - works exactly like `!uid` but for valorant

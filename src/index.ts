@@ -3,7 +3,7 @@ import TerminalCommandsInit from "./terminal-commands";
 import onChannelChatMessage from "./commands";
 import DataInit, { data } from "./data";
 import TwitchAuthorizationInit, { authorization, authorization_bot, runRequestWithTokenRefreshing, scopes_bot, refreshTokenOfBot, refreshTokenOfChannel } from "./twitch-authorization";
-import { Request, EventSub, ResponseBody, Authorization } from "twitch.ts";
+import { Request, EventSub, Authorization } from "twitch.ts";
 //#endregion
 
 //const polling_channels_id: string[] = [];
@@ -14,22 +14,22 @@ async function main() {
 	console.log(`Twitch authorization initialized (${(await callWithElapsedTime(async() => await TwitchAuthorizationInit())).elapsed}ms)\n`);
 
 	connection = EventSub.startWebSocket(authorization_bot);
-	connection.onSessionWelcome = async(message, is_reconnected) => {
+	connection.on("session_welcome", (message, is_reconnected) => {
 		console.log(`EventSub session ${is_reconnected ? "re" : ""}connected\n\turl: ${connection.ws.url}\n`);
-		if (!is_reconnected) await addSubscriptions();
-	};
-	connection.onNotification = async(message) => {
+		if (!is_reconnected) addSubscriptions();
+	});
+	connection.on("notification", message => {
 		if (EventSub.Message.Notification.isChannelChatMessage(message)) onChannelChatMessage(message);
 		else if (EventSub.Message.Notification.isStreamOnline(message)) onStreamOnline(message);
 		else if (EventSub.Message.Notification.isStreamOffline(message)) onStreamOffline(message);
-	};
-	connection.onRevocation = async(message) => {
+	});
+	connection.on("revocation", message => {
 		console.error(`EventSub subscription was revocated\n\tevent: ${message.payload.subscription.type} version ${message.payload.subscription.version}\n\tcondition: ${JSON.stringify(message.payload.subscription.condition)}\n\treason: ${message.payload.subscription.status}\n`);
 		process.exit(1);
-	};
-	connection.onClose = async(code, reason) => {
+	});
+	connection.on("close", (code, reason) => {
 		console.error(`EventSub session disconnected\n\tcode: ${code} - ${reason}\n`);
-	};
+	});
 
 	//checkIfStreamersIsLive();
 }
@@ -81,6 +81,7 @@ async function onStreamOffline(message: EventSub.Message.Notification<EventSub.P
 	setTimeout(getChattersPolling, 60_000); // each minute
 }*/
 
+/*
 async function getStreams(refresh: () => Promise<void>, ...args: Parameters<typeof Request.GetStreams>) {
 	const res_data: ResponseBody.GetStreams["data"] = [];
 	var cursor: string | undefined;
@@ -124,7 +125,7 @@ async function getChatters(refresh: () => Promise<void>, ...args: Parameters<typ
 	}
 	else
 		return r;
-}
+}*/
 
 export async function callWithElapsedTime<R extends any>(func: ()=>Promise<R>): Promise<{ response: R, elapsed: number }> {
 	const time = Date.now();
