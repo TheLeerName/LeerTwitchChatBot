@@ -26,6 +26,4 @@ A simple chat bot for twitch, mostly showcase of my typescript module twitch.ts
 - `moderator:read:followers` - used by command `!followtime` to get follow time of user
 - `moderator:read:chatters` - used for `!watchtime` command system (polling Request.GetChatters)
 ## TODO
-- add translations, cuz bot answers on russian language
-- command `!uid` - sends uid of streamer gacha account (genshin, hsr) of current category, `!setuid <uid>` - sets uid to current category
-- command `!rank` - works exactly like `!uid` but for valorant
+- merge this with db-module-core as new module
